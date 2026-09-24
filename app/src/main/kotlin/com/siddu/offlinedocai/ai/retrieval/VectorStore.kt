@@ -1,0 +1,340 @@
+package com.siddu.offlinedocai.ai.retrieval
+
+import android.util.Log
+import com.siddu.offlinedocai.data.dao.ChunkDao
+import com.siddu.offlinedocai.data.entities.ChunkEntity
+import com.siddu.offlinedocai.data.FloatArrayConverter
+import kotlin.math.ln
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sqrt
+
+/**
+ * Enhanced two-stage hybrid retriever with relevance validation and multi-signal cross-reranking.
+ */
+class VectorStore(private val chunkDao: ChunkDao) {
+
+    private val TAG = "VectorStore"
+
+    private val summaryTriggerKeywords = setOf(
+        "summarize", "summary", "overview", "what is this document about", "what does this document", "main topics", "brief of", "gist"
+    )
+
+    private val stopWords = setOf(
+        "what", "when", "where", "how", "this", "that", "there", "their", "who", "why",
+        "whom", "whose", "which", "them", "with", "from", "the", "is", "are", "was", "were",
+        "and", "or", "in", "on", "at", "to", "a", "an", "of", "for", "by", "about", "give",
+        "tell", "explain", "show", "me", "some", "can", "you", "does", "do", "did", "define",
+        "list", "name", "mention", "describe", "find", "any", "all", "please", "these", "those",
+        "be", "been", "being", "have", "has", "had", "would", "should", "could"
+    )
+
+    private val dimensionUnitMap = mapOf(
+        setOf("capacity", "charge", "charging", "power", "wattage", "energy", "voltage", "current", "battery") to
+            Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:mah|ah|wh|kwh|w|kw|mw|v|kv|mv|a|ma)\b"""),
+        setOf("temperature", "temp", "thermal", "heat", "hot", "cold") to
+            Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:°c|c|°f|f|k|deg|degrees)\b"""),
+        setOf("storage", "memory", "ram", "rom", "disk", "capacity", "space") to
+            Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:gb|mb|tb|kb|pb|bytes)\b"""),
+        setOf("speed", "frequency", "clock", "rate", "latency") to
+            Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:ghz|mhz|khz|hz|fps|rpm|mph|km/h|ms|ns|s)\b"""),
+        setOf("weight", "mass", "heavy", "light") to
+            Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:kg|g|mg|lbs|oz|ton|tons)\b"""),
+        setOf("dimension", "dimensions", "size", "width", "height", "length", "distance", "resolution") to
+            Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:mm|cm|m|km|nm|inches|px|dpi)\b""")
+    )
+
+    enum class RelevanceTier {
+        TIER_A_DIRECT_ANSWER,      // High confidence direct answer evidence
+        TIER_B_SUPPORTING_CONTEXT, // Strongly relevant supporting context
+        TIER_C_BOILERPLATE_WEAK    // Weakly related or generic administrative boilerplate
+    }
+
+    data class CandidateScore(
+        val chunk: ChunkEntity,
+        val initialScore: Float,
+        val denseScore: Float = 0f,
+        var rerankScore: Float = 0f,
+        var tier: RelevanceTier = RelevanceTier.TIER_B_SUPPORTING_CONTEXT,
+        var rejectionReason: String? = null
+    )
+
+    suspend fun retrieve(
+        queryEmbedding: FloatArray,
+        relevantDocumentIds: List<Long>,
+        topK: Int,
+        query: String = ""
+    ): List<ChunkEntity> {
+        if (relevantDocumentIds.isEmpty()) return emptyList()
+
+        val chunks = chunkDao.getAllChunksForDocumentIds(relevantDocumentIds)
+        if (chunks.isEmpty()) return emptyList()
+
+        val cleanQuery = query.lowercase().trim()
+        val rawTokens = cleanQuery.split(Regex("[^a-zA-Z0-9]+")).filter { it.length > 1 }
+
+        // Classify as generic summary query if user asks for document-wide summary
+        val isExplicitSummaryRequest = summaryTriggerKeywords.any { cleanQuery.contains(it) } ||
+            (rawTokens.size <= 3 && listOf("summary", "summarize", "overview", "about").any { cleanQuery.contains(it) })
+
+        if (isExplicitSummaryRequest) {
+            if (chunks.size <= topK) return chunks
+            val step = chunks.size.toDouble() / topK
+            val selected = mutableListOf<ChunkEntity>()
+            for (i in 0 until topK) {
+                val idx = (i * step).toInt().coerceIn(0, chunks.size - 1)
+                if (!selected.contains(chunks[idx])) {
+                    selected.add(chunks[idx])
+                }
+            }
+            return selected
+        }
+
+        // 1. Stage 1: Query Preprocessing & Morphological Term Normalization
+        val queryKeywords = rawTokens.filter { it !in stopWords }
+        val queryStemsMap = queryKeywords.associateWith { getRootStems(it) }
+        val queryPhrase = queryKeywords.joinToString(" ")
+
+        // Metric / Technical specification trigger detection
+        val specTriggerWords = setOf(
+            "capacity", "specs", "specification", "specifications", "spec", "power", "wattage",
+            "battery", "charging", "voltage", "current", "temperature", "temperatures", "dimensions",
+            "dimension", "size", "weight", "storage", "ram", "memory", "speed", "frequency", "resolution"
+        )
+        val isSpecQuery = queryKeywords.any { kw ->
+            val stems = queryStemsMap[kw] ?: setOf(kw)
+            specTriggerWords.any { trigger -> wordMatchesKeyword(trigger, kw, stems) }
+        }
+
+        // 2. Stage 1: Initial Hybrid Retrieval Scoring (Dense + BM25 Lexical)
+        val docCount = chunks.size.toDouble()
+        val avgDocLength = chunks.map { it.text.split(Regex("\\s+")).size }.average().coerceAtLeast(10.0)
+
+        val idfMap = queryKeywords.associateWith { kw ->
+            val stems = queryStemsMap[kw] ?: setOf(kw)
+            val containingDocs = chunks.count { chunk ->
+                val words = chunk.text.split(Regex("[^a-zA-Z0-9]+"))
+                words.any { w -> wordMatchesKeyword(w, kw, stems) }
+            }
+            if (containingDocs > 0) ln((docCount - containingDocs + 0.5) / (containingDocs + 0.5) + 1.0) + 1.0 else 0.5
+        }
+
+        val candidates = mutableListOf<CandidateScore>()
+
+        for (chunk in chunks) {
+            val chunkText = chunk.text
+            val chunkTextLower = chunkText.lowercase()
+            val chunkWords = chunkText.split(Regex("[^a-zA-Z0-9]+")).filter { it.isNotEmpty() }
+            val docLen = chunkWords.size.toDouble()
+
+            // Dense Cosine Similarity
+            var denseScore = 0f
+            if (chunk.embedding != null) {
+                val chunkEmbedding = FloatArrayConverter.toFloatArray(chunk.embedding)
+                if (chunkEmbedding != null && queryEmbedding.isNotEmpty()) {
+                    denseScore = cosineSimilarity(queryEmbedding, chunkEmbedding)
+                }
+            }
+
+            // BM25 Lexical Score
+            var bm25Score = 0.0
+            val k1 = 1.2
+            val b = 0.75
+
+            for (kw in queryKeywords) {
+                val stems = queryStemsMap[kw] ?: setOf(kw)
+                val termOccurrences = chunkWords.count { w -> wordMatchesKeyword(w, kw, stems) }
+                if (termOccurrences > 0) {
+                    val idf = idfMap[kw] ?: 1.0
+                    val tf = (termOccurrences * (k1 + 1)) / (termOccurrences + k1 * (1.0 - b + b * (docLen / avgDocLength)))
+                    bm25Score += tf * idf * 8.0 // Scaled for hybrid balance
+                }
+            }
+
+            // Phrase Match Bonus
+            var phraseBonus = 0.0
+            if (queryPhrase.length >= 4 && chunkTextLower.contains(queryPhrase)) {
+                phraseBonus = 15.0
+            }
+
+            val initialScore = (denseScore * 10f) + bm25Score.toFloat() + phraseBonus.toFloat()
+            candidates.add(CandidateScore(chunk = chunk, initialScore = initialScore, denseScore = denseScore))
+        }
+
+        // 3. Stage 2: Relevance Validation & Multi-Signal Cross-Reranking
+        for (cand in candidates) {
+            val chunkText = cand.chunk.text
+            val chunkLower = chunkText.lowercase()
+            val chunkWords = chunkText.split(Regex("[^a-zA-Z0-9]+")).filter { it.isNotEmpty() }
+            val denseScore = cand.denseScore
+            var rerank = cand.initialScore.toDouble()
+
+            // Count matching query terms
+            var matchedTermCount = 0
+            for (kw in queryKeywords) {
+                val stems = queryStemsMap[kw] ?: setOf(kw)
+                if (chunkWords.any { w -> wordMatchesKeyword(w, kw, stems) }) {
+                    matchedTermCount++
+                }
+            }
+
+            // Signal A: Boilerplate / Administrative Fluff Penalty
+            val isAdministrativeBoilerplate = listOf(
+                "scientific and technical information (sti)",
+                "sti program",
+                "advancement of aeronautics and space science",
+                "standard form 298",
+                "report documentation page",
+                "distribution statement",
+                "table of contents",
+                "all rights reserved",
+                "published by the"
+            ).any { chunkLower.contains(it) }
+
+            if (isAdministrativeBoilerplate) {
+                rerank -= 50.0
+                cand.rejectionReason = "Administrative / STI Program Boilerplate"
+            }
+
+            // Signal B: Exact Query Phrase Bonus
+            if (queryPhrase.length >= 4 && chunkLower.contains(queryPhrase)) {
+                rerank += 25.0
+            }
+
+            // Signal C: Subject / Direct Answer Evidence Specificity (Fully Domain-Agnostic)
+            var specificEvidenceBonus = 0.0
+
+            if (matchedTermCount > 0 || denseScore >= 0.35f) {
+                // 1. Generic Multi-Word Named Entities & Proper Noun Identifiers:
+                val genericEntityRegex = Regex("""\b[A-Z][a-z0-9]+(?:\s+[A-Z0-9][a-z0-9\-]+)+\b|\b[A-Z]{2,10}(?:[\-_]\d+)?\b|\b[A-Z][a-zA-Z0-9]*\s+\d+(?:\.\d+)?\b""")
+                val entityMatches = genericEntityRegex.findAll(chunkText).toList()
+                if (entityMatches.size >= 2) {
+                    specificEvidenceBonus += 15.0 + (entityMatches.size * 3.0).coerceAtMost(20.0)
+                }
+
+                // 2. Generic Comma-Separated Proper Nouns / Entity List Series:
+                val commaListRegex = Regex("""\b[A-Z][a-zA-Z0-9_\-\.\+]{1,25}\b(?:\s*,\s*\b[A-Z][a-zA-Z0-9_\-\.\+]{1,25}\b){2,}""")
+                if (commaListRegex.containsMatchIn(chunkText)) {
+                    specificEvidenceBonus += 20.0
+                }
+
+                // 3. Dimensional Technical Specification Unit Matching:
+                val matchedDimensionRegexes = dimensionUnitMap.entries
+                    .filter { entry -> entry.key.any { dimKey -> queryKeywords.any { kw -> wordMatchesKeyword(dimKey, kw, queryStemsMap[kw] ?: setOf(kw)) } } }
+                    .map { it.value }
+
+                if (matchedDimensionRegexes.isNotEmpty()) {
+                    val matchingUnitCount = matchedDimensionRegexes.sumOf { regex -> regex.findAll(chunkText).count() }
+                    if (matchingUnitCount > 0) {
+                        specificEvidenceBonus += 25.0 + (matchingUnitCount * 5.0).coerceAtMost(25.0)
+                    }
+                } else if (isSpecQuery) {
+                    val anyMetricRegex = Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:mah|ah|wh|kwh|w|kw|mw|v|kv|mv|gb|mb|tb|kb|hz|mhz|ghz|c|°c|f|°f|k|kg|g|mg|lbs|km|m|cm|mm|nm|mph|km/h|ms|s|min|hrs|v|a|ma|rpm|db|dpi|px|%)\b""")
+                    val anyMatches = anyMetricRegex.findAll(chunkText).toList()
+                    if (anyMatches.isNotEmpty()) {
+                        specificEvidenceBonus += 15.0 + (anyMatches.size * 3.0).coerceAtMost(15.0)
+                    }
+                }
+
+                // 4. Structured Colon Headings / Bullet Lists Evidence:
+                val listEvidenceRegex = Regex("""(?:\b[A-Z][a-zA-Z0-9_\-]{2,20}\b\s*[:\-]|•|\*|\b\d+[\.\)])""")
+                val listMatches = listEvidenceRegex.findAll(chunkText).toList()
+                if (listMatches.size >= 2) {
+                    specificEvidenceBonus += 15.0
+                }
+            }
+
+            rerank += specificEvidenceBonus
+
+            // Signal D: Query Keyword Coverage
+            if (queryKeywords.isNotEmpty()) {
+                val coverage = matchedTermCount.toDouble() / queryKeywords.size
+                if (coverage >= 1.0) {
+                    rerank += 20.0
+                } else if (coverage >= 0.5) {
+                    rerank += 10.0
+                } else if (matchedTermCount == 0) {
+                    rerank -= 35.0
+                }
+            }
+
+            cand.rerankScore = rerank.toFloat()
+
+            // Classify Relevance Tier
+            cand.tier = when {
+                isAdministrativeBoilerplate -> RelevanceTier.TIER_C_BOILERPLATE_WEAK
+                matchedTermCount == 0 && denseScore < 0.35f -> RelevanceTier.TIER_C_BOILERPLATE_WEAK
+                (specificEvidenceBonus >= 15.0 || rerank >= 20.0) && (matchedTermCount > 0 || denseScore >= 0.35f) -> RelevanceTier.TIER_A_DIRECT_ANSWER
+                matchedTermCount > 0 || cand.initialScore >= 5.0f -> RelevanceTier.TIER_B_SUPPORTING_CONTEXT
+                else -> RelevanceTier.TIER_C_BOILERPLATE_WEAK
+            }
+        }
+
+        // Sort candidates by rerank score descending
+        val sortedCandidates = candidates.sortedByDescending { it.rerankScore }
+
+        // Diagnostic Logging for each candidate
+        for ((index, cand) in sortedCandidates.withIndex()) {
+            val preview = cand.chunk.text.take(65).replace("\n", " ")
+            val rankStr = if (cand.tier == RelevanceTier.TIER_C_BOILERPLATE_WEAK && cand.rerankScore < 10f) {
+                "FILTERED (${cand.rejectionReason ?: "Low relevance"})"
+            } else {
+                "#${index + 1}"
+            }
+            Log.d(TAG, "[RAG Reranker] Chunk ${cand.chunk.id} (Page ${cand.chunk.pageNumber}): InitScore=${"%.2f".format(cand.initialScore)}, RerankScore=${"%.2f".format(cand.rerankScore)}, Tier=${cand.tier}, Rank=$rankStr | Preview: \"$preview...\"")
+        }
+
+        // Filter out low-relevance boilerplate candidates
+        val relevantCandidates = sortedCandidates.filter {
+            it.tier != RelevanceTier.TIER_C_BOILERPLATE_WEAK && it.rerankScore >= 5.0f
+        }
+
+        if (relevantCandidates.isEmpty()) {
+            Log.w(TAG, "No relevant candidate passed evidence threshold for query: '$query'")
+            return emptyList()
+        }
+
+        return relevantCandidates.take(topK).map { it.chunk }
+    }
+
+    private fun getRootStems(word: String): Set<String> {
+        val w = word.lowercase().trim()
+        val stems = mutableSetOf(w)
+        if (w.endsWith("ies") && w.length > 4) stems.add(w.removeSuffix("ies") + "y")
+        if (w.endsWith("es") && w.length > 4) stems.add(w.removeSuffix("es"))
+        if (w.endsWith("s") && w.length > 3) stems.add(w.removeSuffix("s"))
+        if (w.endsWith("ed") && w.length > 4) stems.add(w.removeSuffix("ed"))
+        if (w.endsWith("ing") && w.length > 5) stems.add(w.removeSuffix("ing"))
+        if (w.endsWith("tion") && w.length > 6) stems.add(w.removeSuffix("tion"))
+        if (w.endsWith("ity") && w.length > 5) stems.add(w.removeSuffix("ity"))
+        if (w.endsWith("able") && w.length > 6) stems.add(w.removeSuffix("able"))
+        if (w.endsWith("ive") && w.length > 5) stems.add(w.removeSuffix("ive"))
+        return stems
+    }
+
+    private fun wordMatchesKeyword(docWord: String, kw: String, kwStems: Set<String>): Boolean {
+        val cleanDocWord = docWord.replace(Regex("[^a-zA-Z0-9]"), "").lowercase()
+        if (cleanDocWord.isEmpty()) return false
+        if (cleanDocWord == kw || cleanDocWord in kwStems) return true
+        if (kwStems.any { cleanDocWord.startsWith(it) || (it.length >= 4 && cleanDocWord.contains(it)) }) return true
+        val docStems = getRootStems(cleanDocWord)
+        if (docStems.any { it in kwStems }) return true
+        return false
+    }
+
+    private fun cosineSimilarity(vectorA: FloatArray, vectorB: FloatArray): Float {
+        if (vectorA.size != vectorB.size) return 0f
+        var dotProduct = 0.0
+        var normA = 0.0
+        var normB = 0.0
+        for (i in vectorA.indices) {
+            val a = vectorA[i].toDouble()
+            val b = vectorB[i].toDouble()
+            dotProduct += a * b
+            normA += a * a
+            normB += b * b
+        }
+        val denom = sqrt(normA) * sqrt(normB)
+        return if (denom == 0.0) 0f else (dotProduct / denom).toFloat()
+    }
+}
