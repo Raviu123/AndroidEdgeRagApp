@@ -124,11 +124,19 @@ How may I help you today?
 
                     // Retrieve relevant chunks (top‑10)
                     val chunks = vectorStore.retrieve(queryEmbedding, cleanDocIds, topK = 10, query = userText)
+                    val pageLookupRegex = Regex("""(?i)\b(?:page|pg|p\.|page\s*no|page\s*number|page\s*#)[\s\.\-\#:]+(\d+)\b|\b(\d+)(?:st|nd|rd|th)?\s+page\b""")
+                    val pageMatch = pageLookupRegex.find(userText)
+                    val requestedPage = pageMatch?.let { m ->
+                        m.groupValues[1].toIntOrNull() ?: m.groupValues[2].toIntOrNull()
+                    }
+
                     val (contextText, sourcesJson) = if (chunks.isNotEmpty()) {
                         Pair(
                             chunks.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" },
                             chunks.joinToString("|||") { "Page ${it.pageNumber}: ${it.text}" }
                         )
+                    } else if (requestedPage != null) {
+                        Pair("[PAGE_NOT_FOUND:$requestedPage]", null)
                     } else {
                         Pair("[NO_EVIDENCE_FOUND]", null)
                     }

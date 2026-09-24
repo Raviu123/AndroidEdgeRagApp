@@ -71,6 +71,34 @@ class VectorStore(private val chunkDao: ChunkDao) {
         if (chunks.isEmpty()) return emptyList()
 
         val cleanQuery = query.lowercase().trim()
+
+        // 0. Stage 0: PAGE_LOOKUP Deterministic Intent Detection & Metadata Filtering
+        val pageLookupRegex = Regex("""(?i)\b(?:page|pg|p\.|page\s*no|page\s*number|page\s*#)[\s\.\-\#:]+(\d+)\b|\b(\d+)(?:st|nd|rd|th)?\s+page\b""")
+        val pageMatch = pageLookupRegex.find(cleanQuery)
+        val requestedPage = pageMatch?.let { m ->
+            m.groupValues[1].toIntOrNull() ?: m.groupValues[2].toIntOrNull()
+        }
+
+        if (requestedPage != null) {
+            val pageChunks = chunks.filter { it.pageNumber == requestedPage }
+                .sortedBy { it.id } // preserve document/chunk sequential order
+
+            // Diagnostic Logging (Requirement 7)
+            Log.i(TAG, "[PAGE_LOOKUP] Detected Intent: PAGE_LOOKUP")
+            Log.i(TAG, "[PAGE_LOOKUP] Requested Page: $requestedPage")
+            Log.i(TAG, "[PAGE_LOOKUP] Resolved Metadata Page Field: ChunkEntity.pageNumber")
+            Log.i(TAG, "[PAGE_LOOKUP] Candidate Chunk IDs: ${chunks.map { it.id }}")
+            Log.i(TAG, "[PAGE_LOOKUP] Candidate Pages: ${chunks.map { it.pageNumber }}")
+            Log.i(TAG, "[PAGE_LOOKUP] Final Selected Pages: ${pageChunks.map { it.pageNumber }}")
+
+            if (pageChunks.isEmpty()) {
+                Log.w(TAG, "[PAGE_LOOKUP] Requested Page $requestedPage not found in document chunks.")
+                return emptyList()
+            }
+
+            return pageChunks
+        }
+
         val rawTokens = cleanQuery.split(Regex("[^a-zA-Z0-9]+")).filter { it.length > 1 }
 
         // Classify as generic summary query if user asks for document-wide summary

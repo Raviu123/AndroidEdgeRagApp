@@ -97,6 +97,31 @@ class RAGRetrievalRelevanceTest {
         embedding = null
     )
 
+    // 4. Multi-Page Document Chunks (The exact observed user failure case: Page 10 vs Page 328 & 341)
+    private val chunk11_Page10_Content = ChunkEntity(
+        id = 401,
+        documentId = 4,
+        pageNumber = 10,
+        text = "Quantum Encryption Protocols: Page 10 outlines post-quantum lattice-based cryptography, detailing Kyber key encapsulation and Dilithium digital signatures for next-generation network communication security.",
+        embedding = null
+    )
+
+    private val chunk12_Page328_Generic = ChunkEntity(
+        id = 402,
+        documentId = 4,
+        pageNumber = 328,
+        text = "Index and Cross-References: For additional security considerations and encryption parameters, refer to page 10 and Appendix B on secure key management.",
+        embedding = null
+    )
+
+    private val chunk13_Page341_Generic = ChunkEntity(
+        id = 403,
+        documentId = 4,
+        pageNumber = 341,
+        text = "Document Bibliography and Historical Citations: Page 10 of NIST Special Publication 800-56A discusses deterministic random number generators.",
+        embedding = null
+    )
+
     private fun createMockContext(): Context {
         val tempDir = File(System.getProperty("java.io.tmpdir"), "offlinedocai_rag_test")
         tempDir.mkdirs()
@@ -407,5 +432,160 @@ class RAGRetrievalRelevanceTest {
         println("ANSWER:\n$answer\n")
         assertTrue("Must contain JWT / RS256", answer.contains("JWT") || answer.contains("JSON Web Tokens") || answer.contains("RS256"))
         assertTrue("Must cite Page 4", answer.contains("(Page 4)"))
+    }
+
+    @Test
+    fun test10_PageLookup_WhatIsThereInPage10_ReturnsOnlyPage10() = runBlocking {
+        // Reproduce exact user scenario: document has Page 10, Page 328, and Page 341.
+        val dao = createMockChunkDao(listOf(chunk11_Page10_Content, chunk12_Page328_Generic, chunk13_Page341_Generic))
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(4L),
+            topK = 5,
+            query = "what is there in page 10"
+        )
+
+        // 1. Verify that ONLY Page 10 is retrieved (No Page 328, No Page 341)
+        assertTrue("Must retrieve Page 10 chunks", retrieved.isNotEmpty())
+        assertTrue("All retrieved chunks must strictly be Page 10", retrieved.all { it.pageNumber == 10 })
+        assertEquals("Chunk 11 (Page 10) must be retrieved", 401L, retrieved.first().id)
+        assertFalse("Must NOT retrieve Page 328", retrieved.any { it.pageNumber == 328 })
+        assertFalse("Must NOT retrieve Page 341", retrieved.any { it.pageNumber == 341 })
+
+        // 2. Synthesize with GGUFLLM
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: what is there in page 10
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST 10: what is there in page 10 ===")
+        println("RETRIEVED PAGES: ${retrieved.map { it.pageNumber }}")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must mention Quantum Encryption Protocols / Kyber", answer.contains("Quantum Encryption") || answer.contains("Kyber"))
+        assertTrue("Answer must cite Page 10", answer.contains("(Page 10)") || answer.contains("Page 10"))
+        assertFalse("Answer must NOT mention Page 328 or Page 341 content", answer.contains("Appendix B") || answer.contains("NIST Special Publication"))
+    }
+
+    @Test
+    fun test11_PageLookup_WhatIsOnPage10_ReturnsOnlyPage10() = runBlocking {
+        val dao = createMockChunkDao(listOf(chunk11_Page10_Content, chunk12_Page328_Generic, chunk13_Page341_Generic))
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(4L),
+            topK = 5,
+            query = "what is on page 10"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        assertTrue("All retrieved chunks must strictly be Page 10", retrieved.all { it.pageNumber == 10 })
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: what is on page 10
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST 11: what is on page 10 ===")
+        println("ANSWER:\n$answer\n")
+        assertTrue("Must contain Kyber / Dilithium", answer.contains("Kyber") || answer.contains("Dilithium"))
+        assertTrue("Must cite Page 10", answer.contains("Page 10"))
+    }
+
+    @Test
+    fun test12_PageLookup_SummarizePage10_ReturnsOnlyPage10() = runBlocking {
+        val dao = createMockChunkDao(listOf(chunk11_Page10_Content, chunk12_Page328_Generic, chunk13_Page341_Generic))
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(4L),
+            topK = 5,
+            query = "summarize page 10"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        assertTrue("All retrieved chunks must strictly be Page 10", retrieved.all { it.pageNumber == 10 })
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: summarize page 10
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST 12: summarize page 10 ===")
+        println("ANSWER:\n$answer\n")
+        assertTrue("Must contain page 10 content", answer.contains("Quantum Encryption") || answer.contains("Kyber"))
+        assertTrue("Must cite Page 10", answer.contains("Page 10"))
+    }
+
+    @Test
+    fun test13_PageLookup_PageDoesNotExist_ReturnsGroundedNotFound() = runBlocking {
+        val dao = createMockChunkDao(listOf(chunk11_Page10_Content, chunk12_Page328_Generic))
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(4L),
+            topK = 5,
+            query = "what is on page 999"
+        )
+
+        // Must be empty because page 999 does not exist
+        assertTrue("Retrieved list must be empty for non-existent page", retrieved.isEmpty())
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = if (retrieved.isNotEmpty()) {
+            retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        } else {
+            "[PAGE_NOT_FOUND:999]"
+        }
+
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: what is on page 999
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST 13: Page 999 Does Not Exist ===")
+        println("ANSWER:\n$answer\n")
+        assertTrue("Must return grounded not found message", answer.contains("couldn't find page 999") || answer.contains("could not find page 999"))
+        assertFalse("Must NOT dump Page 10 or Page 328", answer.contains("Quantum Encryption") || answer.contains("Appendix B"))
+    }
+
+    @Test
+    fun test14_SemanticQueryWithNumber_DoesNotTriggerPageLookup() = runBlocking {
+        val dao = createMockChunkDao(listOf(chunk1_Boilerplate, chunk2_ActualMissions, chunk5_BatteryExactSpecs))
+        val vectorStore = VectorStore(dao)
+
+        // Query with a number, but without "page" keyword -> must run semantic search
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(1L, 2L),
+            topK = 5,
+            query = "Tell me about Apollo 11"
+        )
+
+        assertTrue("Must retrieve relevant Apollo 11 chunk", retrieved.isNotEmpty())
+        assertEquals("Apollo 11 chunk (Page 4) must be retrieved", 102L, retrieved.first().id)
     }
 }

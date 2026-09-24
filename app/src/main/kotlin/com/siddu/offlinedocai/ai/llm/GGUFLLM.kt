@@ -84,7 +84,21 @@ class GGUFLLM(private val context: Context) : LocalLLM {
 
         val qLower = question.lowercase().trim()
 
+        val pageLookupRegex = Regex("""(?i)\b(?:page|pg|p\.|page\s*no|page\s*number|page\s*#)[\s\.\-\#:]+(\d+)\b|\b(\d+)(?:st|nd|rd|th)?\s+page\b""")
+        val pageMatch = pageLookupRegex.find(qLower)
+        val requestedPageNum = pageMatch?.let { m ->
+            m.groupValues[1].toIntOrNull() ?: m.groupValues[2].toIntOrNull()
+        }
+
+        if (contextText.startsWith("[PAGE_NOT_FOUND:")) {
+            val pageNum = contextText.removePrefix("[PAGE_NOT_FOUND:").removeSuffix("]").trim()
+            return@withContext "I couldn't find page $pageNum in the provided document."
+        }
+
         if (contextText == "[NO_EVIDENCE_FOUND]") {
+            if (requestedPageNum != null) {
+                return@withContext "I couldn't find page $requestedPageNum in the provided document."
+            }
             return@withContext "I searched the provided document(s), but could not find information answering \"$question\"."
         }
 
@@ -135,6 +149,35 @@ Key highlights:
         }
 
         val topPage = chunks.firstOrNull()?.page ?: 1
+
+        // 2.5 Deterministic PAGE_LOOKUP synthesis
+        if (requestedPageNum != null) {
+            val pageChunks = chunks.filter { it.page == requestedPageNum }
+            if (pageChunks.isEmpty()) {
+                return@withContext "I couldn't find page $requestedPageNum in the provided document."
+            }
+
+            val pageOverviewTriggers = listOf(
+                "what is there in", "what is on", "what's on", "show", "tell me about", "what does",
+                "contain", "summarize", "summary", "what is mentioned", "give me", "content", "view", "read", "details"
+            )
+            val normalizedTokens = qLower.replace(Regex("[^a-zA-Z0-9]+"), " ").trim()
+            val isExplicitPageOverview = pageOverviewTriggers.any { qLower.contains(it) } ||
+                normalizedTokens == "page $requestedPageNum" ||
+                normalizedTokens == "p $requestedPageNum" ||
+                normalizedTokens == "pg $requestedPageNum"
+
+            if (isExplicitPageOverview) {
+                val fullPageText = pageChunks.joinToString("\n\n") { it.text.trim() }
+                return@withContext """
+📄 **Page $requestedPageNum Content:**
+
+$fullPageText
+
+(Page $requestedPageNum)
+""".trim()
+            }
+        }
 
         // 3. Detect genuine summary/overview questions
         val summaryKeywords = listOf("summarize", "summary", "overview", "what is this document about", "what does this document", "main topics", "brief of", "gist")
