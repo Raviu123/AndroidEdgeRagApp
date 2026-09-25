@@ -2,6 +2,7 @@ package com.siddu.offlinedocai
 
 import android.os.Bundle
 import android.net.Uri
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -50,6 +51,20 @@ class MainActivity : ComponentActivity() {
             com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext)
         } catch (_: Exception) {}
         setContent { OfflineDocAIApp() }
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent?): Boolean {
+        if (event?.actionMasked == MotionEvent.ACTION_HOVER_EXIT) {
+            return true // Safely consume hover exit to prevent AndroidComposeView 1.6.x race condition crash
+        }
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        if (ev?.actionMasked == MotionEvent.ACTION_HOVER_EXIT) {
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
     }
 }
 
@@ -745,6 +760,13 @@ fun ChatScreen(convId: Long, viewModel: MainViewModel, navController: NavHostCon
                     item {
                         Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.CenterStart) {
                             Text("Assistant is thinking...", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                } else if (chatState is ChatRepository.ChatState.Error) {
+                    val errorState = chatState as ChatRepository.ChatState.Error
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.CenterStart) {
+                            Text("⚠️ ${errorState.message}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }

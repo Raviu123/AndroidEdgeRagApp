@@ -588,4 +588,555 @@ class RAGRetrievalRelevanceTest {
         assertTrue("Must retrieve relevant Apollo 11 chunk", retrieved.isNotEmpty())
         assertEquals("Apollo 11 chunk (Page 4) must be retrieved", 102L, retrieved.first().id)
     }
+
+    @Test
+    fun test15_PageLookup_NASA_SE_Handbook_TOC_Synthesis_CleansDottedLeaders() = runBlocking {
+        val chunkTOC = ChunkEntity(
+            id = 501,
+            documentId = 5,
+            pageNumber = 10,
+            text = """
+NASA Systems Engineering Handbook
+Table of Contents
+7.4.1 Basic HF Model .................... 142
+7.4.2 HF Analysis and Evaluation Techniques .................. 145
+7.4.3 Human Factors Engineering (HFE) in Design ................ 148
+            """.trimIndent(),
+            embedding = null
+        )
+        val dao = createMockChunkDao(listOf(chunkTOC))
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(5L),
+            topK = 5,
+            query = "what is there in 10th page"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        assertEquals(10, retrieved.first().pageNumber)
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: what is there in 10th page
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST 15: NASA SE Handbook TOC Synthesis ===")
+        println("ANSWER:\n$answer\n")
+
+        // 1. Must be grounded in Page 10
+        assertTrue("Answer must cite Page 10", answer.contains("Page 10"))
+        assertTrue("Must contain Basic HF Model", answer.contains("Basic HF Model"))
+        assertTrue("Must contain HF Analysis", answer.contains("HF Analysis and Evaluation Techniques"))
+
+        // 2. Dotted leader artifacts must be completely eliminated
+        assertFalse("Must NOT contain dotted leader sequences", answer.contains("......"))
+        assertFalse("Must NOT contain 3 or more consecutive dots", Regex("""\.{3,}""").containsMatchIn(answer))
+
+        // 3. Must be structured cleanly
+        assertTrue("Must format TOC sections cleanly", answer.contains("• 7.4.1 Basic HF Model — Page 142") || answer.contains("7.4.1 Basic HF Model"))
+    }
+
+    // =========================================================================
+    // GENERAL-PURPOSE BOOK RAG REGRESSION SUITE (CATEGORIES A THROUGH L)
+    // =========================================================================
+
+    // Realistic NASA Systems Engineering Handbook Chunks
+    private val se_p3_SE_Engine = ChunkEntity(
+        id = 601, documentId = 10, pageNumber = 3,
+        text = "The Systems Engineering (SE) engine is a cyclical, iterative process consisting of 17 processes categorized into System Design Processes, Product Realization Processes, and Technical Management Processes. It is applied recursively throughout the system structure from the top-level mission down to subsystem components.",
+        embedding = null
+    )
+
+    private val se_p15_Chap2_Intro = ChunkEntity(
+        id = 602, documentId = 10, pageNumber = 15,
+        text = "Chapter 2: Fundamentals of Systems Engineering. This chapter describes the systems engineering discipline, the role of systems engineers, and the core SE engine. Systems engineering provides the technical foundation for the successful realization of complex aerospace systems.",
+        embedding = null
+    )
+
+    private val se_p16_Chap2_Concepts = ChunkEntity(
+        id = 603, documentId = 10, pageNumber = 16,
+        text = "Chapter 2 emphasizes the relationship between project management and systems engineering, iterative decision-making, stakeholder satisfaction, and rigorous trade studies to manage system complexity.",
+        embedding = null
+    )
+
+    private val se_p18_LifeCycle = ChunkEntity(
+        id = 604, documentId = 10, pageNumber = 18,
+        text = "The systems engineering life cycle spans seven distinct project phases, progressing from concept studies (Pre-Phase A) through concept development (Phase A), preliminary design (Phase B), final design (Phase C), fabrication and integration (Phase D), operations (Phase E), to closeout (Phase F).",
+        embedding = null
+    )
+
+    private val se_p20_PrePhaseA = ChunkEntity(
+        id = 605, documentId = 10, pageNumber = 20,
+        text = "The primary purpose of Pre-Phase A (Concept Studies) is to formulate broad mission objectives, assess feasibility, explore alternative concept architectures, and identify initial technical risks and required technology investments.",
+        embedding = null
+    )
+
+    private val se_p21_PhaseA_1 = ChunkEntity(
+        id = 606, documentId = 10, pageNumber = 21,
+        text = "Phase A (Concept and Technology Development) determines the feasible system concept, defines mission architecture, establishes top-level system requirements, and develops initial risk management plans.",
+        embedding = null
+    )
+
+    private val se_p22_PhaseA_2 = ChunkEntity(
+        id = 607, documentId = 10, pageNumber = 22,
+        text = "During Phase A, formal trade studies evaluate alternative designs and the System Requirements Review (SRR) is conducted to ensure requirements baseline readiness before preliminary design.",
+        embedding = null
+    )
+
+    private val se_p23_Page23 = ChunkEntity(
+        id = 608, documentId = 10, pageNumber = 23,
+        text = "Section 3.1: System Requirements Review (SRR) Criteria and Entrance Guidelines. The SRR ensures functional and performance requirements are mature.",
+        embedding = null
+    )
+
+    private val se_p25_PhaseB = ChunkEntity(
+        id = 609, documentId = 10, pageNumber = 25,
+        text = "Phase B (Preliminary Design and Technology Completion) establishes the preliminary design, freezes the baseline requirements, demonstrates critical technology maturity at TRL 6, and culminates in the Preliminary Design Review (PDR).",
+        embedding = null
+    )
+
+    private val se_p40_RequirementsDef = ChunkEntity(
+        id = 610, documentId = 10, pageNumber = 40,
+        text = "Technical Requirements Definition Process transforms stakeholder expectations into clear, unambiguous, verifiable, and allocated technical specifications across system hierarchies.",
+        embedding = null
+    )
+
+    private val se_p88_Verification = ChunkEntity(
+        id = 611, documentId = 10, pageNumber = 88,
+        text = "Section 4.3: System Verification Process provides evidence that the delivered system complies with its specified requirements through test, analysis, inspection, or demonstration.",
+        embedding = null
+    )
+
+    private val se_p104_Validation = ChunkEntity(
+        id = 612, documentId = 10, pageNumber = 104,
+        text = "Section 5.4: System Validation Process demonstrates that the realized system functions as intended in its operational environment to fulfill stakeholder expectations and mission objectives.",
+        embedding = null
+    )
+
+    private val se_p120_TechMgmtProcesses = ChunkEntity(
+        id = 613, documentId = 10, pageNumber = 120,
+        text = "Technical Management Processes include: 1. Technical Planning, 2. Requirements Management, 3. Interface Management, 4. Technical Risk Management, 5. Configuration Management, 6. Technical Data Management, 7. Technical Assessment, and 8. Decision Analysis.",
+        embedding = null
+    )
+
+    private val se_p135_ReqMgmt_Config = ChunkEntity(
+        id = 614, documentId = 10, pageNumber = 135,
+        text = "Requirements Management and Configuration Management ensure baseline control, trace requirements from top-level objectives to component tests, and track changes throughout the system life cycle.",
+        embedding = null
+    )
+
+    private val allSEHandbookChunks = listOf(
+        se_p3_SE_Engine, se_p15_Chap2_Intro, se_p16_Chap2_Concepts, se_p18_LifeCycle,
+        se_p20_PrePhaseA, se_p21_PhaseA_1, se_p22_PhaseA_2, se_p23_Page23,
+        se_p25_PhaseB, se_p40_RequirementsDef, se_p88_Verification, se_p104_Validation,
+        se_p120_TechMgmtProcesses, se_p135_ReqMgmt_Config
+    )
+
+    @Test
+    fun testA_DirectFactualQuestion_PrePhaseA_Purpose() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "What is the purpose of Pre-Phase A?"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        assertEquals(20, retrieved.first().pageNumber)
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: What is the purpose of Pre-Phase A?
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST A: Direct Factual (Pre-Phase A) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must mention concept studies / feasibility", answer.contains("Concept Studies") || answer.contains("feasibility"))
+        assertTrue("Answer must cite Page 20", answer.contains("(Page 20)"))
+    }
+
+    @Test
+    fun testB_ConceptExplanation_SystemsEngineeringLifeCycle() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "Explain the systems engineering life cycle."
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: Explain the systems engineering life cycle.
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST B: Concept Explanation (Life Cycle) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must mention phases", answer.contains("phases") || answer.contains("Phase A") || answer.contains("life cycle"))
+        assertTrue("Answer must cite Page 18", answer.contains("(Page 18)"))
+    }
+
+    @Test
+    fun testC_Definition_WhatIsTheSEEngine() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "What is the SE engine?"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        assertEquals(3, retrieved.first().pageNumber)
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: What is the SE engine?
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST C: Definition (SE Engine) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must define SE engine", answer.contains("SE") || answer.contains("Systems Engineering"))
+        assertTrue("Answer must mention processes", answer.contains("processes") || answer.contains("System Design"))
+        assertTrue("Answer must cite Page 3", answer.contains("(Page 3)"))
+    }
+
+    @Test
+    fun testD_MultiPageQuestion_WhatDoesTheBookSayAboutRequirements() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "What does the book say about requirements?"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        val retrievedPages = retrieved.map { it.pageNumber }.distinct()
+        assertTrue("Must retrieve multiple pages addressing requirements", retrievedPages.size >= 2)
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: What does the book say about requirements?
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST D: Multi-Page (Requirements) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must mention requirements", answer.contains("Requirements"))
+        assertTrue("Answer must cite at least one of the requirements pages", answer.contains("(Page 40)") || answer.contains("(Page 135)") || answer.contains("(Page 23)"))
+    }
+
+    @Test
+    fun testE_Comparison_ComparePhaseAAndPhaseB() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "Compare Phase A and Phase B."
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        val pages = retrieved.map { it.pageNumber }.distinct()
+        assertTrue("Must retrieve Phase A (Page 21 or 22)", pages.contains(21) || pages.contains(22))
+        assertTrue("Must retrieve Phase B (Page 25)", pages.contains(25))
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: Compare Phase A and Phase B.
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST E: Comparison (Phase A vs Phase B) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must mention Phase A", answer.contains("Phase A"))
+        assertTrue("Answer must mention Phase B", answer.contains("Phase B"))
+        assertTrue("Answer must cite Page 21 or Page 22", answer.contains("(Page 21)") || answer.contains("(Page 22)"))
+        assertTrue("Answer must cite Page 25", answer.contains("(Page 25)"))
+    }
+
+    @Test
+    fun testF_WhereInTheBook_VerificationAndValidation() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "Where does the book discuss verification and validation?"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        val pages = retrieved.map { it.pageNumber }.distinct()
+        assertTrue("Must retrieve verification (Page 88)", pages.contains(88))
+        assertTrue("Must retrieve validation (Page 104)", pages.contains(104))
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: Where does the book discuss verification and validation?
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST F: Where In The Book (Verification & Validation) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must cite Page 88", answer.contains("Page 88"))
+        assertTrue("Answer must cite Page 104", answer.contains("Page 104"))
+        assertTrue("Answer must mention verification", answer.contains("Verification") || answer.contains("verification"))
+        assertTrue("Answer must mention validation", answer.contains("Validation") || answer.contains("validation"))
+    }
+
+    @Test
+    fun testG_PageSpecificQuestion_WhatIsOnPage23() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "What is on page 23?"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        assertTrue("All retrieved chunks must strictly be Page 23", retrieved.all { it.pageNumber == 23 })
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: What is on page 23?
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST G: Page-Specific (Page 23) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must cite Page 23", answer.contains("Page 23"))
+        assertTrue("Answer must mention SRR", answer.contains("SRR") || answer.contains("System Requirements Review"))
+    }
+
+    @Test
+    fun testH_ChapterLevelSummary_SummarizeChapter2() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "Summarize Chapter 2."
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        val pages = retrieved.map { it.pageNumber }.distinct()
+        assertTrue("Must retrieve Chapter 2 chunks (Page 15 or 16)", pages.contains(15) || pages.contains(16))
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: Summarize Chapter 2.
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST H: Chapter Summary (Chapter 2) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must cite Chapter 2", answer.contains("Chapter 2") || answer.contains("Fundamentals"))
+        assertTrue("Answer must cite Page 15 or 16", answer.contains("(Page 15)") || answer.contains("(Page 16)"))
+    }
+
+    @Test
+    fun testI_ListExtraction_TechnicalManagementProcesses() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "What are the technical management processes?"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        assertEquals(120, retrieved.first().pageNumber)
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: What are the technical management processes?
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST I: List Extraction (Tech Mgmt Processes) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must contain Technical Planning", answer.contains("Technical Planning"))
+        assertTrue("Answer must contain Configuration Management", answer.contains("Configuration Management"))
+        assertTrue("Answer must contain Decision Analysis", answer.contains("Decision Analysis"))
+        assertTrue("Answer must cite Page 120", answer.contains("(Page 120)"))
+    }
+
+    @Test
+    fun testJ_QuestionWhoseAnswerDoesNotExist_SpaceX_CEO() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "Who is the CEO of SpaceX?"
+        )
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = if (retrieved.isNotEmpty()) {
+            retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        } else {
+            "[NO_EVIDENCE_FOUND]"
+        }
+
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: Who is the CEO of SpaceX?
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST J: Non-Existent Answer ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Must state information not found", answer.contains("could not find information") || answer.contains("I searched the provided document"))
+    }
+
+    @Test
+    fun testK_UnrelatedQuestion_ChocolateCakeRecipe() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "What is the recipe for chocolate cake?"
+        )
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = if (retrieved.isNotEmpty()) {
+            retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        } else {
+            "[NO_EVIDENCE_FOUND]"
+        }
+
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: What is the recipe for chocolate cake?
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST K: Unrelated Question ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Must state information not found", answer.contains("could not find information") || answer.contains("I searched the provided document"))
+    }
+
+    @Test
+    fun testL_QuestionRequiringMultipleRetrievedChunks_WhatHappensInPhaseA() = runBlocking {
+        val dao = createMockChunkDao(allSEHandbookChunks)
+        val vectorStore = VectorStore(dao)
+
+        val retrieved = vectorStore.retrieve(
+            queryEmbedding = FloatArray(384) { 0f },
+            relevantDocumentIds = listOf(10L),
+            topK = 5,
+            query = "What happens in Phase A?"
+        )
+
+        assertTrue(retrieved.isNotEmpty())
+        val retrievedIds = retrieved.map { it.id }
+        assertTrue("Must retrieve Phase A chunk 606 (Page 21)", retrievedIds.contains(606L))
+        assertTrue("Must retrieve Phase A chunk 607 (Page 22)", retrievedIds.contains(607L))
+
+        val llm = GGUFLLM(createMockContext())
+        val contextText = retrieved.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" }
+        val prompt = """
+            Context:
+            $contextText
+
+            Question: What happens in Phase A?
+        """.trimIndent()
+
+        val answer = llm.generate(prompt)
+        println("=== TEST L: Multiple Retrieved Chunks (Phase A) ===")
+        println("ANSWER:\n$answer\n")
+
+        assertTrue("Answer must mention Phase A", answer.contains("Phase A"))
+        assertTrue("Answer must cite Page 21", answer.contains("(Page 21)"))
+        assertTrue("Answer must cite Page 22", answer.contains("(Page 22)"))
+        assertTrue("Answer must mention trade studies or SRR", answer.contains("trade studies") || answer.contains("SRR") || answer.contains("System Requirements Review"))
+    }
 }

@@ -30,6 +30,11 @@ class ChatRepository(
     private val useOllama: Boolean = false // dev flag – set false for final offline mode
 ) {
     private val TAG = "ChatRepository"
+
+    companion object {
+        private val PAGE_LOOKUP_REGEX = Regex("""(?i)\b(?:page|pg|p\.|page\s*no|page\s*number|page\s*#)[\s\.\-\#:]+(\d+)\b|\b(\d+)(?:st|nd|rd|th)?\s+page\b""")
+    }
+
     private val messageDao: MessageDao = db.messageDao()
     private val conversationDao = db.conversationDao()
     private val embeddingEngine: EmbeddingModel = GGUFEmbeddingEngine(context)
@@ -124,8 +129,7 @@ How may I help you today?
 
                     // Retrieve relevant chunks (top‑10)
                     val chunks = vectorStore.retrieve(queryEmbedding, cleanDocIds, topK = 10, query = userText)
-                    val pageLookupRegex = Regex("""(?i)\b(?:page|pg|p\.|page\s*no|page\s*number|page\s*#)[\s\.\-\#:]+(\d+)\b|\b(\d+)(?:st|nd|rd|th)?\s+page\b""")
-                    val pageMatch = pageLookupRegex.find(userText)
+                    val pageMatch = PAGE_LOOKUP_REGEX.find(userText)
                     val requestedPage = pageMatch?.let { m ->
                         m.groupValues[1].toIntOrNull() ?: m.groupValues[2].toIntOrNull()
                     }
@@ -147,7 +151,9 @@ How may I help you today?
                 }
 
                 // Generate full answer from GGUFLLM
-                val answer = llm.generate(prompt)
+                val answer = llm.generate(prompt).ifEmpty {
+                    "I searched the document but could not produce a response for this query."
+                }
 
                 // Insert empty assistant message to initialize streaming updates
                 val assistantMsgId = messageDao.insert(
@@ -176,13 +182,27 @@ How may I help you today?
                             sources = sourcesData
                         )
                     )
-                    delay(40) // speed of stream
+                    delay(30) // speed of stream
                 }
 
                 _chatState.value = ChatState.Idle
-            } catch (e: Exception) {
-                Log.e(TAG, "Chat generation failed", e)
-                _chatState.value = ChatState.Error(e.message ?: "Unknown error")
+            } catch (t: Throwable) {
+                Log.e(TAG, "Chat generation failed", t)
+                val errorMsg = t.message ?: "Unknown error"
+                try {
+                    messageDao.insert(
+                        MessageEntity(
+                            id = 0,
+                            conversationId = conversationId,
+                            role = "assistant",
+                            content = "An error occurred while answering: $errorMsg",
+                            timestamp = System.currentTimeMillis()
+                        )
+                    )
+                } catch (insertError: Throwable) {
+                    Log.e(TAG, "Failed to insert error message into conversation", insertError)
+                }
+                _chatState.value = ChatState.Error(errorMsg)
             }
         }
     }

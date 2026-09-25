@@ -14,6 +14,17 @@ class GGUFLLM(private val context: Context) : LocalLLM {
     private val TAG = "GGUFLLM"
     private val modelFile: File?
 
+    companion object {
+        private val GENERIC_ENTITY_REGEX = Regex("""\b[A-Z][a-z0-9]+(?:\s+[A-Z0-9][a-z0-9\-]+)+\b|\b[A-Z]{2,10}(?:[\-_]\d+)?\b|\b[A-Z][a-zA-Z0-9]*\s+\d+(?:\.\d+)?\b""")
+        private val COMMA_LIST_REGEX = Regex("""\b[A-Z][a-zA-Z0-9_\-\.\+]{1,25}\b(?:\s*,\s*\b[A-Z][a-zA-Z0-9_\-\.\+]{1,25}\b){2,}""")
+        private val METRIC_UNIT_REGEX = Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:mah|ah|wh|kwh|w|kw|mw|v|kv|mv|gb|mb|tb|kb|hz|mhz|ghz|c|°c|f|°f|k|kg|g|mg|lbs|km|m|cm|mm|nm|mph|km/h|ms|s|min|hrs|v|a|ma|rpm|db|dpi|px|%)\b""")
+        private val NUM_MATCHES_REGEX = Regex("""(?:\b\d+[\.\)]\s+)""")
+        private val WORD_SPLIT_REGEX = Regex("[^a-zA-Z0-9]+")
+        private val NON_ALPHANUMERIC_REGEX = Regex("""[^a-zA-Z0-9\s]""")
+        private val SENTENCE_SPLIT_REGEX = Regex("""(?<=[.!?])\s+""")
+        private val CHUNK_REGEX = Regex("""\[Page\s+(\d+)\]\s*([\s\S]*?)(?=\n\[Page\s+\d+\]|$)""")
+    }
+
     private val dimensionUnitMap = mapOf(
         setOf("capacity", "charge", "charging", "power", "wattage", "energy", "voltage", "current", "battery") to
             Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:mah|ah|wh|kwh|w|kw|mw|v|kv|mv|a|ma)\b"""),
@@ -133,8 +144,7 @@ Key highlights:
         }
 
         // 2. Parse chunks with explicit page numbers: [Page X] <chunk text>
-        val chunkRegex = Regex("\\[Page\\s+(\\d+)\\]\\s*([\\s\\S]*?)(?=\\n\\[Page\\s+\\d+\\]|\$)")
-        val matches = chunkRegex.findAll(contextText).toList()
+        val matches = CHUNK_REGEX.findAll(contextText).toList()
 
         data class PageChunk(val page: Int, val text: String)
         val chunks = if (matches.isNotEmpty()) {
@@ -158,21 +168,28 @@ Key highlights:
             }
 
             val pageOverviewTriggers = listOf(
-                "what is there in", "what is on", "what's on", "show", "tell me about", "what does",
-                "contain", "summarize", "summary", "what is mentioned", "give me", "content", "view", "read", "details"
+                "what is there in", "what is on", "what's on", "what is in", "what's in", "what does",
+                "show", "tell me about", "tell me", "contain", "summarize", "summary", "what is mentioned",
+                "give me", "content", "view", "read", "details", "overview", "explain page"
             )
             val normalizedTokens = qLower.replace(Regex("[^a-zA-Z0-9]+"), " ").trim()
             val isExplicitPageOverview = pageOverviewTriggers.any { qLower.contains(it) } ||
                 normalizedTokens == "page $requestedPageNum" ||
                 normalizedTokens == "p $requestedPageNum" ||
-                normalizedTokens == "pg $requestedPageNum"
+                normalizedTokens == "pg $requestedPageNum" ||
+                normalizedTokens == "$requestedPageNum page" ||
+                normalizedTokens == "${requestedPageNum}th page" ||
+                normalizedTokens == "${requestedPageNum}st page" ||
+                normalizedTokens == "${requestedPageNum}nd page" ||
+                normalizedTokens == "${requestedPageNum}rd page"
 
             if (isExplicitPageOverview) {
-                val fullPageText = pageChunks.joinToString("\n\n") { it.text.trim() }
+                val fullRawText = pageChunks.joinToString("\n\n") { it.text.trim() }
+                val formattedPage = formatPageContent(fullRawText)
                 return@withContext """
 📄 **Page $requestedPageNum Content:**
 
-$fullPageText
+$formattedPage
 
 (Page $requestedPageNum)
 """.trim()
@@ -181,8 +198,9 @@ $fullPageText
 
         // 3. Detect genuine summary/overview questions
         val summaryKeywords = listOf("summarize", "summary", "overview", "what is this document about", "what does this document", "main topics", "brief of", "gist")
-        val isExplicitSummary = summaryKeywords.any { qLower.contains(it) } ||
-            (qLower.split(Regex("\\s+")).size <= 3 && listOf("summary", "summarize", "overview", "about").any { qLower.contains(it) })
+        val hasSpecificTarget = Regex("""(?i)\b(?:chapter|section|page|phase|appendix)\b""").containsMatchIn(qLower)
+        val isExplicitSummary = !hasSpecificTarget && (summaryKeywords.any { qLower.contains(it) } ||
+            (qLower.split(Regex("\\s+")).size <= 3 && listOf("summary", "summarize", "overview", "about").any { qLower.contains(it) }))
 
         if (isExplicitSummary) {
             val bulletPoints = mutableListOf<String>()
@@ -704,7 +722,12 @@ ${formattedBlocks.joinToString("\n\n")}
             "you", "tell", "me", "explain", "give", "show", "please", "which", "will", "would",
             "mentioned", "say", "talk", "says", "talks", "i", "my", "we", "our"
         )
-        val queryKeywords = qLower.split(Regex("[^a-zA-Z0-9]+")).filter { it.length > 1 && it !in stopWords }
+        val compoundIdentifierPattern = Regex("""(?i)\b(pre[- ]phase|phase|stage|step|chapter|section|appendix|type|level|tier)\s+([a-zA-Z0-9]+)\b""")
+        val compoundMatches = compoundIdentifierPattern.findAll(qLower).toList()
+        val compoundTokens = compoundMatches.map { it.value.lowercase() }
+        val compoundSubTokens = compoundMatches.flatMap { listOf(it.groupValues[1].lowercase(), it.groupValues[2].lowercase()) }
+
+        val queryKeywords = qLower.split(Regex("[^a-zA-Z0-9]+")).filter { (it.length > 1 || it in compoundSubTokens) && (it !in stopWords || it in compoundSubTokens) }.distinct()
         val queryStemsMap = queryKeywords.associateWith { getRootStems(it) }
         val queryPhrase = queryKeywords.joinToString(" ")
 
@@ -722,16 +745,19 @@ ${formattedBlocks.joinToString("\n\n")}
         data class ScoredCandidate(val page: Int, val text: String, val score: Double)
         val candidates = mutableListOf<ScoredCandidate>()
 
-        for (chunk in chunks) {
-            // Split chunk text into candidate units using known section headers or punctuation
-            val sectionSplitPattern = Regex("(?i)(?=(?:\\b(?:${allKnownSectionHeaders.take(25).joinToString("|") { Regex.escape(it) }})\\b\\s*[:\\-]?))")
-            val rawSections = chunk.text.split(sectionSplitPattern).map { it.trim() }.filter { it.isNotEmpty() }
+        val sectionSplitPattern = Regex("(?i)(?=(?:\\b(?:${allKnownSectionHeaders.take(25).joinToString("|") { Regex.escape(it) }})\\b\\s*[:\\-]?))")
 
+        for (chunk in chunks) {
+            val rawSections = chunk.text.split(sectionSplitPattern).map { it.trim() }.filter { it.isNotEmpty() }
             val units = mutableListOf<String>()
 
             for (sec in rawSections) {
-                if (sec.contains(Regex("[.!?]"))) {
-                    for (sent in sec.split(Regex("(?<=[.!?])\\s+"))) {
+                val numMatchesInSec = NUM_MATCHES_REGEX.findAll(sec).count()
+                if (numMatchesInSec >= 2 && sec.length <= 500) {
+                    units.add(sec.trim())
+                } else if (sec.contains('.') || sec.contains('!') || sec.contains('?')) {
+                    val sents = sec.split(SENTENCE_SPLIT_REGEX)
+                    for (sent in sents) {
                         val s = sent.trim()
                         if (s.length in 10..350) units.add(s)
                     }
@@ -754,23 +780,50 @@ ${formattedBlocks.joinToString("\n\n")}
                     } else if (sec.length > 350) {
                         val words = sec.split(Regex("\\s+"))
                         var i = 0
-                        while (i < words.size) {
+                        while (i < words.size && units.size < 25) {
                             val sub = words.subList(i, minOf(i + 25, words.size)).joinToString(" ")
                             units.add(sub)
                             i += 20
                         }
                     }
                 }
+                if (units.size >= 25) break
             }
 
             for (unit in units) {
                 val unitLower = unit.lowercase()
-                val unitWords = unit.split(Regex("[^a-zA-Z0-9]+")).filter { it.isNotEmpty() }
+                val unitNorm = unitLower.replace(NON_ALPHANUMERIC_REGEX, " ")
+                val unitWords = unit.split(WORD_SPLIT_REGEX).filter { it.isNotEmpty() }
                 var score = 0.0
 
                 // Continuous phrase match bonus
-                if (queryPhrase.length >= 4 && unitLower.contains(queryPhrase)) {
+                if (queryPhrase.length >= 4 && (unitLower.contains(queryPhrase) || unitNorm.contains(queryPhrase))) {
                     score += 50.0
+                }
+
+                // Compound identifier match bonus
+                for (ct in compoundTokens) {
+                    val normCt = ct.replace("-", " ")
+                    if (unitLower.contains(ct) || unitNorm.contains(normCt)) {
+                        score += 35.0
+                    }
+                    // Penalize conflicting identifier in same category (e.g. Phase B when querying Phase A)
+                    val parts = ct.split(Regex("""\s+"""))
+                    if (parts.size == 2) {
+                        val prefix = parts[0]
+                        val idVal = parts[1]
+                        val conflictPattern = Regex("""\b${Regex.escape(prefix)}\s+([a-zA-Z0-9]+)\b""")
+                        val unitConflicts = conflictPattern.findAll(unitLower).map { it.groupValues[1] }.filter { it != idVal }.toList()
+                        if (unitConflicts.isNotEmpty() && !unitLower.contains(ct) && !unitNorm.contains(normCt)) {
+                            score -= 30.0
+                        }
+                    }
+                }
+
+                // Numbered list pattern bonus
+                val numMatchesInUnit = NUM_MATCHES_REGEX.findAll(unit).count()
+                if (numMatchesInUnit >= 2) {
+                    score += 30.0
                 }
 
                 var matchedKeywordCount = 0
@@ -789,15 +842,13 @@ ${formattedBlocks.joinToString("\n\n")}
                     }
 
                     // Generic Multi-Word Proper Nouns & Alphanumeric Identifiers / Entities Evidence:
-                    val genericEntityRegex = Regex("""\b[A-Z][a-z0-9]+(?:\s+[A-Z0-9][a-z0-9\-]+)+\b|\b[A-Z]{2,10}(?:[\-_]\d+)?\b|\b[A-Z][a-zA-Z0-9]*\s+\d+(?:\.\d+)?\b""")
-                    val entityMatches = genericEntityRegex.findAll(unit).toList()
+                    val entityMatches = GENERIC_ENTITY_REGEX.findAll(unit).toList()
                     if (entityMatches.size >= 2) {
                         score += 15.0 + (entityMatches.size * 3.0).coerceAtMost(20.0)
                     }
 
                     // Generic Comma-Separated Proper Nouns / Entity List Series:
-                    val commaListRegex = Regex("""\b[A-Z][a-zA-Z0-9_\-\.\+]{1,25}\b(?:\s*,\s*\b[A-Z][a-zA-Z0-9_\-\.\+]{1,25}\b){2,}""")
-                    if (commaListRegex.containsMatchIn(unit)) {
+                    if (COMMA_LIST_REGEX.containsMatchIn(unit)) {
                         score += 20.0
                     }
 
@@ -812,8 +863,7 @@ ${formattedBlocks.joinToString("\n\n")}
                             score += 25.0 + (matchingUnitCount * 5.0).coerceAtMost(25.0)
                         }
                     } else if (isSpecQuery) {
-                        val metricUnitRegex = Regex("""(?i)\b\d+(?:\.\d+)?\s*(?:mah|ah|wh|kwh|w|kw|mw|v|kv|mv|gb|mb|tb|kb|hz|mhz|ghz|c|°c|f|°f|k|kg|g|mg|lbs|km|m|cm|mm|nm|mph|km/h|ms|s|min|hrs|v|a|ma|rpm|db|dpi|px|%)\b""")
-                        val metricMatches = metricUnitRegex.findAll(unit).toList()
+                        val metricMatches = METRIC_UNIT_REGEX.findAll(unit).toList()
                         if (metricMatches.isNotEmpty()) {
                             score += 15.0 + (metricMatches.size * 3.0).coerceAtMost(15.0)
                         }
@@ -844,24 +894,218 @@ ${formattedBlocks.joinToString("\n\n")}
         candidates.sortByDescending { it.score }
 
         if (candidates.isNotEmpty() && candidates.first().score >= 15.0) {
-            val topItems = mutableListOf<ScoredCandidate>()
-            val seenText = mutableSetOf<String>()
+            // Intent 1: Comparison / Difference Query
+            val comparisonRegex = Regex("""(?i)\b(?:compare|difference\s+between)\s+(.+?)\s+(?:and|with|to|vs|versus)\s+(.+)|\b(.+?)\s+(?:vs|versus)\s+(.+)\b""")
+            val compMatch = comparisonRegex.find(qLower)
+            if (compMatch != null) {
+                val rawTargetA = compMatch.groupValues[1].ifEmpty { compMatch.groupValues[3] }.trim()
+                val rawTargetB = compMatch.groupValues[2].ifEmpty { compMatch.groupValues[4] }.trim()
+                val targetA = rawTargetA.replace(Regex("""[^a-zA-Z0-9\s]"""), " ").trim()
+                val targetB = rawTargetB.replace(Regex("""[^a-zA-Z0-9\s]"""), " ").trim()
 
-            for (c in candidates) {
-                val norm = c.text.lowercase().trim()
-                if (seenText.add(norm)) {
-                    topItems.add(c)
+                if (targetA.isNotEmpty() && targetB.isNotEmpty()) {
+                    val wordsA = targetA.split(Regex("\\s+")).filter { it.isNotEmpty() }
+                    val wordsB = targetB.split(Regex("\\s+")).filter { it.isNotEmpty() }
+
+                    val specificCandA = candidates.filter { c ->
+                        val cl = c.text.lowercase()
+                        val clNorm = cl.replace(Regex("""[^a-zA-Z0-9\s]"""), " ")
+                        (clNorm.contains(targetA) || (wordsA.size > 1 && wordsA.all { clNorm.contains(it) })) &&
+                            !clNorm.contains(targetB)
+                    }.sortedByDescending { c ->
+                        val clNorm = c.text.lowercase().replace(Regex("""[^a-zA-Z0-9\s]"""), " ").trim()
+                        val leadBonus = if (clNorm.startsWith(targetA)) 30.0 else 0.0
+                        c.score + leadBonus
+                    }
+                    val specificCandB = candidates.filter { c ->
+                        val cl = c.text.lowercase()
+                        val clNorm = cl.replace(Regex("""[^a-zA-Z0-9\s]"""), " ")
+                        (clNorm.contains(targetB) || (wordsB.size > 1 && wordsB.all { clNorm.contains(it) })) &&
+                            !clNorm.contains(targetA)
+                    }.sortedByDescending { c ->
+                        val clNorm = c.text.lowercase().replace(Regex("""[^a-zA-Z0-9\s]"""), " ").trim()
+                        val leadBonus = if (clNorm.startsWith(targetB)) 30.0 else 0.0
+                        c.score + leadBonus
+                    }
+
+                    val candA = specificCandA.ifEmpty {
+                        candidates.filter { c ->
+                            val cl = c.text.lowercase()
+                            val clNorm = cl.replace(Regex("""[^a-zA-Z0-9\s]"""), " ")
+                            clNorm.contains(targetA) || (wordsA.size > 1 && wordsA.all { clNorm.contains(it) })
+                        }
+                    }
+                    val candB = specificCandB.ifEmpty {
+                        candidates.filter { c ->
+                            val cl = c.text.lowercase()
+                            val clNorm = cl.replace(Regex("""[^a-zA-Z0-9\s]"""), " ")
+                            clNorm.contains(targetB) || (wordsB.size > 1 && wordsB.all { clNorm.contains(it) })
+                        }
+                    }
+
+                    if (candA.isNotEmpty() && candB.isNotEmpty()) {
+                        val itemA = candA.first()
+                        val itemB = candB.firstOrNull { it != itemA } ?: candB.first()
+                        val labelA = targetA.split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                        val labelB = targetB.split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+
+                        val diffSentences = mutableListOf<String>()
+                        for (c in candidates) {
+                            val cl = c.text.lowercase()
+                            if ((cl.contains(targetA) && cl.contains(targetB)) ||
+                                cl.contains("while") || cl.contains("whereas") || cl.contains("differs") || cl.contains("unlike")) {
+                                diffSentences.add("${c.text} (Page ${c.page})")
+                                if (diffSentences.size >= 2) break
+                            }
+                        }
+
+                        val diffSection = if (diffSentences.isNotEmpty()) {
+                            "\n\n**Key Distinctions:**\n" + diffSentences.joinToString("\n") { "• $it" }
+                        } else {
+                            ""
+                        }
+
+                        return@withContext """
+Based on the document, here is the comparison between **$labelA** and **$labelB**:
+
+• **$labelA (Page ${itemA.page}):** ${itemA.text}
+• **$labelB (Page ${itemB.page}):** ${itemB.text}$diffSection
+""".trim()
+                    }
                 }
-                if (topItems.size >= 2) break
             }
 
-            val formattedAnswers = topItems.joinToString("\n\n") { "${it.text} (Page ${it.page})" }
+            // Intent 2: Location / Source Query ("where does the book discuss X?")
+            val locationRegex = Regex("""(?i)\bwhere\s+(?:does|can|in|is|are|do)?\s*(?:the\s+book|the\s+document|we|i)?\s*(?:discuss|mention|talk\s+about|cover|find|address|describe)\b|\bwhere\s+in\s+the\s+book\b|\bwhich\s+(?:pages|sections|chapters)\s+(?:discuss|mention|cover)\b""")
+            if (locationRegex.containsMatchIn(qLower)) {
+                val pageCandidates = candidates.groupBy { it.page }
+                val locationEntries = mutableListOf<String>()
+                for ((pageNum, pageCands) in pageCandidates) {
+                    val bestCand = pageCands.maxByOrNull { it.score } ?: continue
+                    locationEntries.add("• **Page $pageNum:** ${bestCand.text}")
+                    if (locationEntries.size >= 4) break
+                }
+                if (locationEntries.isNotEmpty()) {
+                    val topicTitle = qLower.replace(locationRegex, "").replace(Regex("""[^a-zA-Z0-9\s]"""), " ").trim()
+                        .split(" ").filter { it.length > 2 && it !in stopWords }.joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                        .ifEmpty { "the requested topic" }
 
-            return@withContext """
-Based on your document:
+                    return@withContext """
+The document discusses **$topicTitle** in the following location(s):
 
-$formattedAnswers
-""".trimIndent()
+${locationEntries.joinToString("\n")}
+""".trim()
+                }
+            }
+
+            // Intent 3: Chapter / Section Summary
+            val chapterSummaryRegex = Regex("""(?i)\b(?:summarize|summary\s+of|overview\s+of|what\s+is\s+in)\s+(chapter\s+[a-zA-Z0-9]+|section\s+[a-zA-Z0-9\.]+)\b""")
+            val chapMatch = chapterSummaryRegex.find(qLower)
+            if (chapMatch != null) {
+                val targetChapter = chapMatch.groupValues[1].lowercase()
+                val chapterName = chapMatch.groupValues[1].split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                val chapCands = candidates.filter { it.text.lowercase().contains(targetChapter) }.ifEmpty { candidates.take(4) }
+                if (chapCands.isNotEmpty()) {
+                    val overviewText = chapCands.first().text + " (Page ${chapCands.first().page})"
+                    val keyPoints = chapCands.drop(1).map { "• ${it.text} (Page ${it.page})" }
+                    val pointsSection = if (keyPoints.isNotEmpty()) "\n\n**Key Points:**\n" + keyPoints.joinToString("\n") else ""
+                    return@withContext """
+📖 **$chapterName Overview:**
+
+$overviewText$pointsSection
+""".trim()
+                }
+            }
+
+            // Intent 4: List / Enumeration Extraction
+            val listQueryRegex = Regex("""(?i)\b(?:what\s+are\s+the|give\s+me\s+all\s+(?:the)?|list\s+(?:all\s+the|all)?|name\s+(?:all\s+the|all)?|which\s+(?:are\s+the)?)\s+(.+)\b""")
+            val isListQuery = listQueryRegex.containsMatchIn(qLower) &&
+                listOf("processes", "phases", "steps", "types", "elements", "components", "requirements", "guidelines", "activities", "stages", "principles", "functions", "missions").any { qLower.contains(it) }
+
+            if (isListQuery) {
+                for (cand in candidates.take(4)) {
+                    val text = cand.text
+                    val numListPattern = Regex("""(?:\b\d+[\.\)]\s+[^\d\.\)]+)""")
+                    val numMatches = numListPattern.findAll(text).toList()
+                    if (numMatches.size >= 2) {
+                        val formattedItems = numMatches.mapIndexed { idx, m ->
+                            val cleanItem = m.value.replace(Regex("""^\d+[\.\)]\s*"""), "")
+                                .replace(Regex("""^(?:and|or)\s+"""), "")
+                                .replace(Regex("""\s+(?:and|or)$"""), "")
+                                .trim()
+                                .trimEnd(',', ';', '.')
+                            "${idx + 1}. $cleanItem"
+                        }
+                        return@withContext """
+Based on the document, the items are:
+
+${formattedItems.joinToString("\n")}
+
+(Page ${cand.page})
+""".trim()
+                    }
+
+                    val commaSeriesRegex = Regex("""\b([A-Z][a-zA-Z0-9_\-\s]{2,40})(?:,\s*([A-Z][a-zA-Z0-9_\-\s]{2,40}))+(?:,\s*and\s*|\s+and\s+)([A-Z][a-zA-Z0-9_\-\s]{2,40})""")
+                    val commaMatch = commaSeriesRegex.find(text)
+                    if (commaMatch != null) {
+                        val items = text.substring(commaMatch.range.first, commaMatch.range.last + 1)
+                            .split(Regex(""",\s*(?:and\s+)?|\s+and\s+"""))
+                            .map { it.trim().trimEnd('.', ';', ',') }
+                            .filter { it.length > 2 }
+                        if (items.size >= 3) {
+                            val bulletList = items.mapIndexed { idx, itm -> "${idx + 1}. $itm" }.joinToString("\n")
+                            return@withContext """
+Based on the document:
+
+$bulletList
+
+(Page ${cand.page})
+""".trim()
+                        }
+                    }
+                }
+            }
+
+            // Intent 5: Existence Check ("Does the book mention X?")
+            val existenceRegex = Regex("""(?i)\b(?:does|is|are|can)\s+(?:the\s+book|the\s+document)?\s*(?:mention|contain|discuss|have|include|reference)\b""")
+            if (existenceRegex.containsMatchIn(qLower)) {
+                val top = candidates.first()
+                val topic = qLower.replace(existenceRegex, "").replace(Regex("""[^a-zA-Z0-9\s]"""), " ").trim()
+                    .split(" ").filter { it.length > 2 && it !in stopWords }.joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                    .ifEmpty { "this topic" }
+
+                return@withContext """
+Yes, the document discusses **$topic**. According to Page ${top.page}:
+
+${top.text} (Page ${top.page})
+""".trim()
+            }
+
+            // Intent 6: General Document QA & Concept Explanation
+            val topCand = candidates.first()
+            val supportingPoints = mutableListOf<ScoredCandidate>()
+            val seenText = mutableSetOf<String>(topCand.text.lowercase().trim())
+
+            for (c in candidates.drop(1)) {
+                val norm = c.text.lowercase().trim()
+                if (seenText.add(norm) && c.score >= 15.0 && (c.page != topCand.page || c.text.length > 30)) {
+                    supportingPoints.add(c)
+                }
+                if (supportingPoints.size >= 2) break
+            }
+
+            if (supportingPoints.isEmpty() || isSpecQuery || (topCand.score >= 30.0 && (supportingPoints.firstOrNull()?.score ?: 0.0) < topCand.score * 0.7)) {
+                return@withContext "${topCand.text} (Page ${topCand.page})"
+            } else {
+                val mainAnswer = "${topCand.text} (Page ${topCand.page})"
+                val details = supportingPoints.joinToString("\n") { "• ${it.text} (Page ${it.page})" }
+                return@withContext """
+$mainAnswer
+
+Key details from the document:
+$details
+""".trim()
+            }
         }
 
         // 7. Grounded Not Found Fallback: NEVER hallucinate or return generic boilerplate
@@ -887,10 +1131,65 @@ $formattedAnswers
         val cleanDocWord = docWord.replace(Regex("[^a-zA-Z0-9]"), "").lowercase()
         if (cleanDocWord.isEmpty()) return false
         if (cleanDocWord == kw || cleanDocWord in kwStems) return true
-        if (kwStems.any { cleanDocWord.startsWith(it) || (it.length >= 4 && cleanDocWord.contains(it)) }) return true
+        if (kwStems.any { (it.length >= 4 && cleanDocWord.startsWith(it)) || (it.length >= 4 && cleanDocWord.contains(it)) }) return true
         val docStems = getRootStems(cleanDocWord)
         if (docStems.any { it in kwStems }) return true
         return false
+    }
+
+    private fun formatPageContent(rawText: String): String {
+        val lines = rawText.lines()
+        val formattedLines = mutableListOf<String>()
+
+        for (rawLine in lines) {
+            var line = rawLine.trim()
+            if (line.isEmpty()) continue
+
+            // 1. Clean up Table of Contents leader dots with trailing page numbers
+            // e.g. "7.4.1 Basic HF Model .................... 142" or "1. Introduction . . . . . . 10"
+            line = line.replace(Regex("""(?:\s*[\.·]){3,}\s*(\d+)\s*$"""), " — Page $1")
+
+            // 2. Clean up any remaining long chains of dots / leader trails (3 or more dots)
+            line = line.replace(Regex("""(?:\s*[\.·]){3,}|\.{3,}"""), " — ")
+
+            // 3. Clean up multiple spaces and trailing dashes
+            line = line.replace(Regex("""[ \t]{2,}"""), " ")
+                .removeSuffix(" —")
+                .trim()
+
+            if (line.isEmpty()) continue
+
+            // 4. If line is a TOC / numbered section / bullet entry, format neatly
+            val isNumberedSection = Regex("""^(?:[0-9]+(?:\.[0-9]+)*|[A-Z]\.[0-9]*|\d+\))\s+""").containsMatchIn(line)
+            val isBullet = line.startsWith("•") || line.startsWith("-") || line.startsWith("*")
+
+            if (isNumberedSection && !isBullet) {
+                formattedLines.add("• $line")
+            } else {
+                formattedLines.add(line)
+            }
+        }
+
+        // Group into paragraphs / clean structure
+        val result = mutableListOf<String>()
+        var currentBulletGroup = mutableListOf<String>()
+
+        for (line in formattedLines) {
+            if (line.startsWith("• ")) {
+                currentBulletGroup.add(line)
+            } else {
+                if (currentBulletGroup.isNotEmpty()) {
+                    result.add(currentBulletGroup.joinToString("\n"))
+                    currentBulletGroup = mutableListOf()
+                }
+                result.add(line)
+            }
+        }
+        if (currentBulletGroup.isNotEmpty()) {
+            result.add(currentBulletGroup.joinToString("\n"))
+        }
+
+        return result.joinToString("\n\n").trim()
     }
 }
 
