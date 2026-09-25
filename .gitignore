@@ -34,3 +34,10 @@ google-services.json
 
 # Reference copy
 OfflineDocAIApp/
+OfflineDocAI_backup_original/
+
+# Model binaries (downloaded/installed dynamically, not stored in git)
+*.gguf
+*.onnx
+app/src/main/assets/models/llm/*.gguf
+app/src/main/assets/models/embedding/*.onnx
