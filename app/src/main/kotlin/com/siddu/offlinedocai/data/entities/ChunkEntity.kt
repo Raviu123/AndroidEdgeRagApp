@@ -9,5 +9,9 @@ data class ChunkEntity(
     val documentId: Long,
     val pageNumber: Int,
     val text: String,
-    var embedding: ByteArray? = null
+    var embedding: ByteArray? = null,
+    val chunkIndex: Int = 0,
+    val pageSpan: String = "$pageNumber",
+    val sectionTitle: String? = null,
+    val paragraphIndex: Int = 0
 )

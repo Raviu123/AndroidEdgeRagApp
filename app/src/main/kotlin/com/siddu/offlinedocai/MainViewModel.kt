@@ -30,7 +30,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         application,
         AppDatabase::class.java,
         "offline_docai.db"
-    ).fallbackToDestructiveMigration().build()
+    ).addMigrations(AppDatabase.MIGRATION_1_2).fallbackToDestructiveMigration().build()
 
     private val documentDao = database.documentDao()
     private val conversationDao = database.conversationDao()
@@ -71,25 +71,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             conversationDao.getAllConversations().collect { _conversations.value = it }
         }
         checkModels()
-        autoDownloadEmbeddingIfMissing()
     }
 
     fun checkModels() {
-        val embedDir = File(getApplication<Application>().filesDir, "models/embeddings")
-        val hasEmbed = embedDir.listFiles()?.any { it.extension.equals("gguf", ignoreCase = true) } == true
-        isEmbeddingModelDownloaded.value = hasEmbed
+        val app = getApplication<Application>()
+        // 1. Check local ONNX embedding model (or bundled in assets)
+        val embedOnnxDir = File(app.filesDir, "models/embedding")
+        val hasLocalEmbed = File(embedOnnxDir, "all-MiniLM-L6-v2.onnx").exists()
+        val hasAssetEmbed = try {
+            app.assets.list("models/embedding")?.contains("all-MiniLM-L6-v2.onnx") == true
+        } catch (_: Exception) { false }
+        isEmbeddingModelDownloaded.value = hasLocalEmbed || hasAssetEmbed
 
-        val llmDir = File(getApplication<Application>().filesDir, "models/llm")
+        // 2. Check local GGUF LLM model (or bundled in assets)
+        val llmDir = File(app.filesDir, "models/llm")
         val llmFiles = llmDir.listFiles()?.filter { it.extension.equals("gguf", ignoreCase = true) } ?: emptyList()
+        val hasAssetLlm = try {
+            app.assets.list("models/llm")?.any { it.endsWith(".gguf", ignoreCase = true) } == true
+        } catch (_: Exception) { false }
+
         downloadedLlmModels.value = llmFiles
-        isLlmModelDownloaded.value = llmFiles.isNotEmpty()
+        isLlmModelDownloaded.value = llmFiles.isNotEmpty() || hasAssetLlm
         if (selectedLlmModel.value == null || !selectedLlmModel.value!!.exists()) {
-            selectedLlmModel.value = llmFiles.firstOrNull()
+            selectedLlmModel.value = llmFiles.firstOrNull { it.name.contains("1.5b", ignoreCase = true) }
+                ?: llmFiles.firstOrNull()
         }
     }
 
     fun selectLlmModel(file: File) {
         selectedLlmModel.value = file
+        val model = com.siddu.offlinedocai.ai.llm.GGUFLLM.SupportedModel.fromFilename(file.name)
+        if (model != null) {
+            chatRepository.selectLlmModel(model)
+        }
+    }
+
+    fun selectSupportedModel(model: com.siddu.offlinedocai.ai.llm.GGUFLLM.SupportedModel): Boolean {
+        return chatRepository.selectLlmModel(model)
     }
 
     fun deleteLlmModel(file: File) {
@@ -101,21 +119,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun autoDownloadEmbeddingIfMissing() {
-        if (!isEmbeddingModelDownloaded.value) {
-            downloadEmbeddingModel()
-        }
-    }
-
     fun downloadEmbeddingModel() {
-        val destFile = File(getApplication<Application>().filesDir, "models/embeddings/all-MiniLM-L6-v2.Q4_K_M.gguf")
-        viewModelScope.launch {
-            embeddingDownloader.downloadModel(
-                "https://huggingface.co/leliuga/all-MiniLM-L6-v2-GGUF/resolve/main/all-MiniLM-L6-v2.Q4_K_M.gguf",
-                destFile
-            )
-            checkModels()
-        }
+        // Embedding model is bundled locally in assets; verify extraction
+        checkModels()
     }
 
     fun downloadLlmModel(urlStr: String, fileName: String) {

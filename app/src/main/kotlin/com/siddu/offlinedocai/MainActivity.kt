@@ -756,22 +756,59 @@ fun ChatScreen(convId: Long, viewModel: MainViewModel, navController: NavHostCon
                     }
                 }
 
-                if (chatState is ChatRepository.ChatState.Thinking) {
-                    item {
-                        Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.CenterStart) {
-                            Text("Assistant is thinking...", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                when (val state = chatState) {
+                    is ChatRepository.ChatState.Retrieving -> {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Searching document and retrieving context...", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
-                } else if (chatState is ChatRepository.ChatState.Error) {
-                    val errorState = chatState as ChatRepository.ChatState.Error
-                    item {
-                        Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.CenterStart) {
-                            Text("⚠️ ${errorState.message}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                    is ChatRepository.ChatState.Generating -> {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    if (state.elapsedSeconds > 0) "Generating answer (${state.elapsedSeconds}s)..." else "Generating answer...",
+                                    color = Color.Gray,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
                         }
                     }
+                    is ChatRepository.ChatState.Thinking -> {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Assistant is thinking...", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                    is ChatRepository.ChatState.Error -> {
+                        item {
+                            Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.CenterStart) {
+                                Text("⚠️ ${state.message}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                    else -> {}
                 }
             }
 
+            val isBusy = chatState !is ChatRepository.ChatState.Idle && chatState !is ChatRepository.ChatState.Error
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -792,7 +829,7 @@ fun ChatScreen(convId: Long, viewModel: MainViewModel, navController: NavHostCon
                             textInput = ""
                         }
                     },
-                    enabled = textInput.isNotBlank() && chatState !is ChatRepository.ChatState.Thinking
+                    enabled = textInput.isNotBlank() && !isBusy
                 ) {
                     Icon(Icons.Default.Send, contentDescription = "Send")
                 }
@@ -877,6 +914,20 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         Spacer(modifier = Modifier.height(24.dp))
         Text("Download Additional Models:", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = {
+                viewModel.downloadLlmModel(
+                    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+                    "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+                )
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Download Qwen 2.5 1.5B (Default / Production) (1.1 GB)")
+        }
+
         Spacer(modifier = Modifier.height(8.dp))
 
         Button(

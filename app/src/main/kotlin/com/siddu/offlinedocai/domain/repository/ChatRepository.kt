@@ -7,6 +7,13 @@ import com.siddu.offlinedocai.ai.embeddings.GGUFEmbeddingEngine
 import com.siddu.offlinedocai.ai.llm.LocalLLM
 import com.siddu.offlinedocai.ai.llm.OllamaLLM
 import com.siddu.offlinedocai.ai.llm.GGUFLLM
+import com.siddu.offlinedocai.ai.retrieval.AssembledContext
+import com.siddu.offlinedocai.ai.retrieval.ContextAssembler
+import com.siddu.offlinedocai.ai.retrieval.QueryClassification
+import com.siddu.offlinedocai.ai.retrieval.QueryIntent
+import com.siddu.offlinedocai.ai.retrieval.QueryIntentRouter
+import com.siddu.offlinedocai.ai.retrieval.RetrievalResult
+import com.siddu.offlinedocai.ai.retrieval.SourceBlock
 import com.siddu.offlinedocai.ai.retrieval.VectorStore
 import com.siddu.offlinedocai.data.AppDatabase
 import com.siddu.offlinedocai.data.dao.MessageDao
@@ -14,6 +21,7 @@ import com.siddu.offlinedocai.data.entities.MessageEntity
 import com.siddu.offlinedocai.data.entities.ConversationEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -31,17 +39,24 @@ class ChatRepository(
 ) {
     private val TAG = "ChatRepository"
 
-    companion object {
-        private val PAGE_LOOKUP_REGEX = Regex("""(?i)\b(?:page|pg|p\.|page\s*no|page\s*number|page\s*#)[\s\.\-\#:]+(\d+)\b|\b(\d+)(?:st|nd|rd|th)?\s+page\b""")
-    }
-
     private val messageDao: MessageDao = db.messageDao()
     private val conversationDao = db.conversationDao()
     private val embeddingEngine: EmbeddingModel = GGUFEmbeddingEngine(context)
-    private val llm: LocalLLM = if (useOllama) OllamaLLM() else GGUFLLM(context)
+    internal val llm: LocalLLM = if (useOllama) OllamaLLM() else GGUFLLM(context)
 
     private val _chatState = MutableStateFlow<ChatState>(ChatState.Idle)
     val chatState: StateFlow<ChatState> = _chatState
+
+    /** Safely switch the underlying GGUF LLM model (e.g. Qwen 0.5B vs Llama 3.2 1B) */
+    fun selectLlmModel(model: GGUFLLM.SupportedModel): Boolean {
+        return if (llm is GGUFLLM) {
+            llm.selectModel(model)
+        } else false
+    }
+
+    fun getActiveLlmModel(): GGUFLLM.SupportedModel? {
+        return (llm as? GGUFLLM)?.getActiveModel()
+    }
 
     /** Create a new conversation, auto-generate welcome message, and return its ID */
     suspend fun startConversation(title: String = "Chat ${System.currentTimeMillis()}", documentId: Long? = null): Long = kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -105,8 +120,10 @@ How may I help you today?
     /** Send a user message, run RAG or LLM, and stream the assistant response */
     fun sendMessage(conversationId: Long, userText: String, relevantDocumentIds: List<Long>) {
         CoroutineScope(Dispatchers.IO).launch {
+            var timerJob: kotlinx.coroutines.Job? = null
             try {
-                _chatState.value = ChatState.Thinking
+                Log.i("RAG_DEBUG", "RAG_DEBUG_01_QUERY_START: query='$userText' convId=$conversationId docIds=$relevantDocumentIds")
+                _chatState.value = ChatState.Retrieving
                 // Persist user message
                 val userMsg = MessageEntity(
                     id = 0,
@@ -121,39 +138,93 @@ How may I help you today?
                 val cleanDocIds = relevantDocumentIds.filter { it > 0 }
 
                 // Build prompt based on whether valid documents are linked
+                var assembledContext: com.siddu.offlinedocai.ai.retrieval.AssembledContext? = null
                 val (prompt, sourcesData) = if (cleanDocIds.isEmpty()) {
                     Pair(buildNormalPrompt(userText), null)
                 } else {
                     // Embedding of the query
+                    Log.i("RAG_DEBUG", "RAG_DEBUG_02_EMBEDDING_START")
                     val queryEmbedding = embeddingEngine.getEmbedding(userText)
+                    Log.i("RAG_DEBUG", "RAG_DEBUG_03_EMBEDDING_DONE: size=${queryEmbedding.size}")
+                    val queryClassification = QueryIntentRouter.route(userText)
 
-                    // Retrieve relevant chunks (top‑10)
-                    val chunks = vectorStore.retrieve(queryEmbedding, cleanDocIds, topK = 10, query = userText)
-                    val pageMatch = PAGE_LOOKUP_REGEX.find(userText)
-                    val requestedPage = pageMatch?.let { m ->
-                        m.groupValues[1].toIntOrNull() ?: m.groupValues[2].toIntOrNull()
-                    }
+                    // Retrieve detailed candidates (top-20 for adequate candidate pool)
+                    val retrieved = vectorStore.retrieveDetailed(
+                        queryEmbedding = queryEmbedding,
+                        relevantDocumentIds = cleanDocIds,
+                        topK = 20,
+                        query = userText
+                    )
+                    Log.i("RAG_DEBUG", "RAG_DEBUG_04_RETRIEVAL_DONE: count=${retrieved.size} pages=${retrieved.map { it.chunk.pageNumber }.distinct()}")
 
-                    val (contextText, sourcesJson) = if (chunks.isNotEmpty()) {
-                        Pair(
-                            chunks.joinToString("\n\n") { "[Page ${it.pageNumber}] ${it.text}" },
-                            chunks.joinToString("|||") { "Page ${it.pageNumber}: ${it.text}" }
-                        )
-                    } else if (requestedPage != null) {
-                        Pair("[PAGE_NOT_FOUND:$requestedPage]", null)
-                    } else {
-                        Pair("[NO_EVIDENCE_FOUND]", null)
-                    }
+                    val evidenceBudget = ContextAssembler.resolveEvidenceBudget(queryClassification.intent)
+                    val assembled = ContextAssembler.assemble(
+                        retrievedResults = retrieved,
+                        queryIntent = queryClassification.intent,
+                        queryClassification = queryClassification,
+                        maxEvidenceTokens = evidenceBudget
+                    )
+                    assembledContext = assembled
+                    Log.i("RAG_DEBUG", "RAG_DEBUG_05_CONTEXT_DONE: tokens=${assembled.totalEstimatedTokens} chars=${assembled.contextText.length}")
 
                     // Build prompt
-                    val p = buildPrompt(contextText, userText)
-                    Pair(p, sourcesJson)
+                    val p = buildPrompt(assembled.contextText, userText)
+                    Pair(p, assembled.sourcesJson)
+                }
+
+                _chatState.value = ChatState.Generating(0)
+                timerJob = CoroutineScope(Dispatchers.Default).launch {
+                    var elapsed = 0
+                    while (true) {
+                        delay(1000)
+                        elapsed++
+                        if (_chatState.value is ChatState.Generating) {
+                            _chatState.value = ChatState.Generating(elapsed)
+                        } else {
+                            break
+                        }
+                    }
                 }
 
                 // Generate full answer from GGUFLLM
-                val answer = llm.generate(prompt).ifEmpty {
-                    "I searched the document but could not produce a response for this query."
+                val answer = if (assembledContext != null && assembledContext.sourceBlocks.isEmpty() && assembledContext.contextText.startsWith("[")) {
+                    // Grounded response for negative/empty retrieval
+                    when {
+                        assembledContext.contextText.startsWith("[PAGE_NOT_FOUND:") -> {
+                            val p = assembledContext.contextText.removePrefix("[PAGE_NOT_FOUND:").removeSuffix("]").trim()
+                            "I couldn't find page $p in the provided document."
+                        }
+                        assembledContext.contextText.startsWith("[PAGE_RANGE_NOT_FOUND:") -> {
+                            val r = assembledContext.contextText.removePrefix("[PAGE_RANGE_NOT_FOUND:").removeSuffix("]").trim()
+                            "I couldn't find pages $r in the provided document."
+                        }
+                        else -> {
+                            "I searched the provided document(s), but could not find information answering \"$userText\"."
+                        }
+                    }
+                } else {
+                    val rawAnswer = try {
+                        val deferred = kotlinx.coroutines.CoroutineScope(Dispatchers.Default).async {
+                            llm.generate(prompt)
+                        }
+                        kotlinx.coroutines.withTimeout(120_000L) {
+                            deferred.await()
+                        }
+                    } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                        Log.e("RAG_DEBUG", "LLM inference exceeded 120s threshold on device")
+                        throw IllegalStateException("Model generation timed out after 120 seconds. Please try again with a shorter query.")
+                    } catch (t: Throwable) {
+                        Log.e("RAG_DEBUG", "LLM inference encountered error: ${t.message}", t)
+                        throw t
+                    }
+                    Log.i("RAG_DEBUG", "RAG_DEBUG_10_REPOSITORY_RETURN: len=${rawAnswer.length}")
+                    if (rawAnswer.isBlank()) {
+                        throw IllegalStateException("Local neural model produced an empty answer.")
+                    }
+                    rawAnswer
                 }
+
+                timerJob?.cancel()
 
                 // Insert empty assistant message to initialize streaming updates
                 val assistantMsgId = messageDao.insert(
@@ -185,8 +256,11 @@ How may I help you today?
                     delay(30) // speed of stream
                 }
 
+                Log.i("RAG_DEBUG", "RAG_DEBUG_11_SUCCESS_STATE: answerLen=${answer.length}")
                 _chatState.value = ChatState.Idle
             } catch (t: Throwable) {
+                timerJob?.cancel()
+                Log.e("RAG_DEBUG", "RAG_DEBUG_12_ERROR_STATE: error=${t.message}", t)
                 Log.e(TAG, "Chat generation failed", t)
                 val errorMsg = t.message ?: "Unknown error"
                 try {
@@ -203,6 +277,11 @@ How may I help you today?
                     Log.e(TAG, "Failed to insert error message into conversation", insertError)
                 }
                 _chatState.value = ChatState.Error(errorMsg)
+            } finally {
+                timerJob?.cancel()
+                if (_chatState.value is ChatState.Generating || _chatState.value is ChatState.Retrieving || _chatState.value is ChatState.Thinking) {
+                    _chatState.value = ChatState.Idle
+                }
             }
         }
     }
@@ -230,9 +309,26 @@ Answer concisely, referencing the page numbers when appropriate.
 """.trimIndent()
     }
 
+    /** Expose context assembly for testing and direct pipeline queries */
+    fun assembleContext(
+        retrievedResults: List<com.siddu.offlinedocai.ai.retrieval.RetrievalResult>,
+        queryIntent: com.siddu.offlinedocai.ai.retrieval.QueryIntent,
+        queryClassification: QueryClassification? = null,
+        maxEvidenceTokens: Int = ContextAssembler.DEFAULT_MAX_CONTEXT_TOKENS
+    ): AssembledContext {
+        return com.siddu.offlinedocai.ai.retrieval.ContextAssembler.assemble(
+            retrievedResults = retrievedResults,
+            queryIntent = queryIntent,
+            queryClassification = queryClassification,
+            maxEvidenceTokens = maxEvidenceTokens
+        )
+    }
+
     sealed class ChatState {
         object Idle : ChatState()
         object Thinking : ChatState()
+        object Retrieving : ChatState()
+        data class Generating(val elapsedSeconds: Int = 0) : ChatState()
         data class Error(val message: String) : ChatState()
     }
 }

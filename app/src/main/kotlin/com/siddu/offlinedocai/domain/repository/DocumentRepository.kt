@@ -81,20 +81,19 @@ class DocumentRepository(
                 val docId = documentDao.insert(document)
 
                 _importState.value = ImportState.Chunking
-                val allChunks = mutableListOf<ChunkEntity>()
-                result.pages.forEachIndexed { pageIdx, pageText ->
-                    val chunks = TextChunker.chunkText(pageText.text, pageNumber = pageIdx + 1)
-                    chunks.forEach { chunk ->
-                        allChunks.add(
-                            ChunkEntity(
-                                id = 0,
-                                documentId = docId,
-                                pageNumber = chunk.pageNumber,
-                                text = chunk.text,
-                                embedding = null // placeholder, will be filled after embedding
-                            )
-                        )
-                    }
+                val chunks = TextChunker.chunkDocument(result.pages)
+                val allChunks = chunks.map { chunk ->
+                    ChunkEntity(
+                        id = 0,
+                        documentId = docId,
+                        pageNumber = chunk.pageNumber,
+                        text = chunk.text,
+                        embedding = null,
+                        chunkIndex = chunk.index,
+                        pageSpan = chunk.pageSpan,
+                        sectionTitle = chunk.sectionTitle,
+                        paragraphIndex = chunk.paragraphIndex
+                    )
                 }
 
                 _importState.value = ImportState.Embedding

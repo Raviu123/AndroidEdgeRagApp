@@ -85,7 +85,7 @@ object DocumentProcessor {
                     for (i in 1..pageCount) {
                         stripper.startPage = i
                         stripper.endPage = i
-                        val rawText = stripper.getText(document).trim()
+                        val rawText = stripper.getText(document).replace("\r\n", "\n").trim()
                         if (rawText.isNotEmpty()) {
                             pages.add(ExtractedPage(pageNumber = i, text = rawText))
                         }
@@ -100,21 +100,38 @@ object DocumentProcessor {
     }
 
     /**
-     * Extract text from a DOCX InputStream.
-     * DOCX does not expose page boundaries; we treat the whole document as a single logical page (page 1).
+     * Extract text and tables from a DOCX InputStream in document sequence.
+     * DOCX does not expose physical page boundaries; we treat the document as logical pages or single logical unit.
      */
     private fun extractDocx(inputStream: InputStream?): ExtractedDocument {
         if (inputStream == null) throw DocumentProcessingException.UriOpeningFailed("Cannot open InputStream for DOCX")
         try {
             inputStream.use { stream ->
                 XWPFDocument(stream).use { doc ->
-                    val paragraphs = doc.paragraphs
-                    if (paragraphs.isEmpty()) throw DocumentProcessingException.EmptyDocument("DOCX contains no readable text")
+                    val bodyElements = doc.bodyElements
+                    if (bodyElements.isEmpty()) throw DocumentProcessingException.EmptyDocument("DOCX contains no readable text")
                     val textBuilder = StringBuilder()
-                    for (p in paragraphs) {
-                        textBuilder.append(p.text).append('\n')
+                    for (elem in bodyElements) {
+                        when (elem) {
+                            is org.apache.poi.xwpf.usermodel.XWPFParagraph -> {
+                                val pText = elem.text.trim()
+                                if (pText.isNotEmpty()) {
+                                    textBuilder.append(pText).append("\n\n")
+                                }
+                            }
+                            is org.apache.poi.xwpf.usermodel.XWPFTable -> {
+                                for (row in elem.rows) {
+                                    val cells = row.tableCells.map { cell -> cell.text.trim().replace("\n", " ") }
+                                    if (cells.any { it.isNotEmpty() }) {
+                                        textBuilder.append("| ").append(cells.joinToString(" | ")).append(" |\n")
+                                    }
+                                }
+                                textBuilder.append("\n")
+                            }
+                        }
                     }
                     val fullText = textBuilder.toString().trim()
+                    if (fullText.isEmpty()) throw DocumentProcessingException.EmptyDocument("DOCX contains no readable text")
                     val page = ExtractedPage(pageNumber = 1, text = fullText)
                     return ExtractedDocument(pageCount = 1, pages = listOf(page))
                 }
@@ -126,17 +143,15 @@ object DocumentProcessor {
     }
 
     /**
-     * Extract text from a plain TXT InputStream.
-     * The whole file is regarded as a single page.
+     * Extract text from a plain TXT InputStream preserving line and paragraph structure.
      */
     private fun extractTxt(inputStream: InputStream?): ExtractedDocument {
         if (inputStream == null) throw DocumentProcessingException.UriOpeningFailed("Cannot open InputStream for TXT")
         try {
             inputStream.use { stream ->
                 BufferedReader(InputStreamReader(stream)).use { reader ->
-                    val lines = reader.readLines()
-                    if (lines.isEmpty()) throw DocumentProcessingException.EmptyDocument("TXT file is empty")
-                    val fullText = lines.joinToString("\n").trim()
+                    val fullText = reader.readText().replace("\r\n", "\n").trim()
+                    if (fullText.isEmpty()) throw DocumentProcessingException.EmptyDocument("TXT file is empty")
                     val page = ExtractedPage(pageNumber = 1, text = fullText)
                     return ExtractedDocument(pageCount = 1, pages = listOf(page))
                 }

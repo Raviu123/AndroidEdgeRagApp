@@ -9,6 +9,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "Build examples" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "Build server" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "Disable OpenMP" FORCE)
+
+if (${ANDROID_ABI} STREQUAL "x86_64")
+    set(GGML_AVX ON CACHE BOOL "Enable AVX" FORCE)
+    set(GGML_AVX2 ON CACHE BOOL "Enable AVX2" FORCE)
+    set(GGML_FMA ON CACHE BOOL "Enable FMA" FORCE)
+    set(GGML_F16C ON CACHE BOOL "Enable F16C" FORCE)
+    set(GGML_SSE42 ON CACHE BOOL "Enable SSE 4.2" FORCE)
+    add_compile_options(-O3 -mavx -mavx2 -mfma -mf16c -msse4.2)
+else()
+    add_compile_options(-O3)
+endif()
 
 # Download and compile llama.cpp from official repo
 include(FetchContent)

@@ -38,6 +38,39 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInit(JNIEnv* env, jobject
         return 0;
     }
 
+    FILE* fp = fopen(path, "rb");
+    if (!fp) {
+        LOGE("Cannot open model file: %s", path);
+        env->ReleaseStringUTFChars(model_path, path);
+        return 0;
+    }
+    fseek(fp, 0, SEEK_END);
+    long long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    char magic[5] = {0};
+    size_t rb = fread(magic, 1, 4, fp);
+    fclose(fp);
+
+    if (rb < 4 || std::string(magic, 4) != "GGUF") {
+        LOGE("File at %s is not a valid GGUF file! Header magic: '%s'", path, magic);
+        env->ReleaseStringUTFChars(model_path, path);
+        return 0;
+    }
+
+    std::string path_str(path);
+    std::string filename = path_str;
+    size_t last_slash = path_str.find_last_of("/\\");
+    if (last_slash != std::string::npos) {
+        filename = path_str.substr(last_slash + 1);
+    }
+
+    __android_log_print(ANDROID_LOG_INFO, "MODEL_VERIFICATION", "==================================================");
+    __android_log_print(ANDROID_LOG_INFO, "MODEL_VERIFICATION", "MODEL_PATH=%s", path);
+    __android_log_print(ANDROID_LOG_INFO, "MODEL_VERIFICATION", "MODEL_FILENAME=%s", filename.c_str());
+    __android_log_print(ANDROID_LOG_INFO, "MODEL_VERIFICATION", "MODEL_FILE_SIZE=%lld", file_size);
+    __android_log_print(ANDROID_LOG_INFO, "MODEL_VERIFICATION", "GGUF_MAGIC_VERIFIED=true");
+
     llama_backend_init();
 
     llama_model_params model_params = llama_model_default_params();
@@ -45,14 +78,25 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInit(JNIEnv* env, jobject
     env->ReleaseStringUTFChars(model_path, path);
 
     if (!model) {
-        LOGE("Failed to load model from file");
+        LOGE("Failed to load model from file: %s", path_str.c_str());
         return 0;
     }
 
+    char desc[128] = {0};
+    llama_model_desc(model, desc, sizeof(desc));
+    uint64_t n_params = llama_model_n_params(model);
+
+    __android_log_print(ANDROID_LOG_INFO, "MODEL_VERIFICATION", "MODEL_ARCHITECTURE=%s", desc);
+    __android_log_print(ANDROID_LOG_INFO, "MODEL_VERIFICATION", "MODEL_PARAMETER_COUNT=%llu", (unsigned long long)n_params);
+    __android_log_print(ANDROID_LOG_INFO, "MODEL_VERIFICATION", "ENGINE_STATE=GGUF_NATIVE");
+    __android_log_print(ANDROID_LOG_INFO, "MODEL_VERIFICATION", "==================================================");
+
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = context_size;
+    ctx_params.n_batch = 512;
+    ctx_params.n_ubatch = 256;
     ctx_params.n_threads = thread_count;
-    ctx_params.n_threads_batch = 1;
+    ctx_params.n_threads_batch = thread_count;
 
     llama_context* ctx = llama_init_from_model(model, ctx_params);
     if (!ctx) {
@@ -122,17 +166,22 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     llama_context* ctx = model_ctx->ctx;
 
     llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 2048;
+    ctx_params.n_ctx = 1024;
+    ctx_params.n_batch = 512;
+    ctx_params.n_ubatch = 256;
     ctx_params.n_threads = model_ctx->thread_count;
-    ctx_params.n_threads_batch = 1;
+    ctx_params.n_threads_batch = model_ctx->thread_count;
 
-    llama_free(ctx);
-    ctx = llama_init_from_model(model, ctx_params);
     if (!ctx) {
-        LOGE("Failed to recreate llama context");
-        return env->NewStringUTF("Error: Failed to recreate context");
+        ctx = llama_init_from_model(model, ctx_params);
+        if (!ctx) {
+            LOGE("Failed to create llama context");
+            return env->NewStringUTF("Error: Failed to create context");
+        }
+        model_ctx->ctx = ctx;
+    } else {
+        llama_memory_clear(llama_get_memory(ctx), true);
     }
-    model_ctx->ctx = ctx;
 
     const struct llama_vocab* vocab = llama_model_get_vocab(model);
 
@@ -141,10 +190,10 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PROMPT_TOKENIZATION_START");
 
     std::vector<llama_token> tokens(prompt_str.length() + 4);
-    int n_tokens = llama_tokenize(vocab, prompt_str.c_str(), prompt_str.length(), tokens.data(), tokens.size(), true, true);
+    int n_tokens = llama_tokenize(vocab, prompt_str.c_str(), prompt_str.length(), tokens.data(), tokens.size(), false, true);
     if (n_tokens < 0) {
         tokens.resize(-n_tokens);
-        n_tokens = llama_tokenize(vocab, prompt_str.c_str(), prompt_str.length(), tokens.data(), tokens.size(), true, true);
+        n_tokens = llama_tokenize(vocab, prompt_str.c_str(), prompt_str.length(), tokens.data(), tokens.size(), false, true);
     }
     tokens.resize(n_tokens);
 
@@ -180,7 +229,7 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
 
     std::atomic<bool> decode_finished(false);
     std::thread watchdog([&decode_finished]() {
-        for (int i = 0; i < 150; ++i) { // 15 seconds
+        for (int i = 0; i < 3000; ++i) { // 300 seconds (5 min) safe timeout for emulator
             if (decode_finished.load()) {
                 return;
             }
@@ -223,10 +272,14 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     auto t_sampler_start = std::chrono::steady_clock::now();
     llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
     llama_sampler* smpl = llama_sampler_chain_init(sparams);
-    llama_sampler_chain_add(smpl, llama_sampler_init_temp(temperature));
-    llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
-    llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9f, 1));
-    llama_sampler_chain_add(smpl, llama_sampler_init_dist(1234));
+    if (temperature <= 0.0f) {
+        llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
+    } else {
+        llama_sampler_chain_add(smpl, llama_sampler_init_temp(temperature));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9f, 1));
+        llama_sampler_chain_add(smpl, llama_sampler_init_dist(1234));
+    }
     auto t_sampler_end = std::chrono::steady_clock::now();
     sampler_create_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_sampler_end - t_sampler_start).count();
 
@@ -259,7 +312,7 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     int tokens_generated = 0;
     while (tokens_generated < max_tokens) {
         auto t_stop_start = std::chrono::steady_clock::now();
-        bool is_eos = (curr_token == llama_vocab_eos(vocab));
+        bool is_eos = llama_vocab_is_eog(vocab, curr_token);
         auto t_stop_end = std::chrono::steady_clock::now();
         stop_check_ms += std::chrono::duration_cast<std::chrono::milliseconds>(t_stop_end - t_stop_start).count();
 
@@ -270,7 +323,14 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
         char token_piece[256];
         int n_chars = llama_token_to_piece(vocab, curr_token, token_piece, sizeof(token_piece), 0, true);
         if (n_chars > 0) {
-            generated_text.append(token_piece, n_chars);
+            std::string piece(token_piece, n_chars);
+            if (piece.find("<|im_end|>") != std::string::npos || 
+                piece.find("<|endoftext|>") != std::string::npos ||
+                piece.find("<|eot_id|>") != std::string::npos ||
+                piece.find("<|end_of_text|>") != std::string::npos) {
+                break;
+            }
+            generated_text.append(piece);
         }
 
         batch.n_tokens = 0;
@@ -347,4 +407,20 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "TOTAL_NATIVE_INFERENCE_MS = %lld", total_native_ms);
 
     return result;
+}
+
+// Active Package JNI Wrappers for com.siddu.offlinedocai.ai.llm.LlamaRunner
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_siddu_offlinedocai_ai_llm_LlamaRunner_nativeInit(JNIEnv* env, jobject thiz, jstring model_path, jint context_size, jint thread_count) {
+    return Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInit(env, thiz, model_path, context_size, thread_count);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_siddu_offlinedocai_ai_llm_LlamaRunner_nativeFree(JNIEnv* env, jobject thiz, jlong model_context) {
+    Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeFree(env, thiz, model_context);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_siddu_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jobject thiz, jlong model_context, jstring prompt, jint max_tokens, jfloat temperature) {
+    return Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(env, thiz, model_context, prompt, max_tokens, temperature);
 }

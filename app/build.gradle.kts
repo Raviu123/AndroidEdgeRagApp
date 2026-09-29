@@ -15,6 +15,32 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-O3", "-fexceptions", "-frtti")
+                cFlags += listOf("-O3")
+                arguments += listOf(
+                    "-DGGML_AVX=ON",
+                    "-DGGML_AVX2=ON",
+                    "-DGGML_FMA=ON",
+                    "-DGGML_F16C=ON",
+                    "-DGGML_SSE42=ON"
+                )
+            }
+        }
+    }
+
+    ndkVersion = "26.1.10909125"
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildFeatures {
@@ -62,11 +88,17 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("org.apache.poi:poi-ooxml:5.2.3")
 
+    // ONNX Runtime Android for real local embeddings
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
+
     // Debug tooling
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.8")
     debugImplementation("androidx.compose.ui:ui-test-manifest:1.6.8")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test:rules:1.5.0")
 }
 

@@ -135,6 +135,10 @@ class RAGRetrievalRelevanceTest {
             override suspend fun insertAll(chunks: List<ChunkEntity>) {}
             override fun getChunksForDocument(docId: Long): Flow<List<ChunkEntity>> = flowOf(chunkList.filter { it.documentId == docId })
             override suspend fun getAllChunksForDocumentIds(docIds: List<Long>): List<ChunkEntity> = chunkList.filter { it.documentId in docIds }
+            override suspend fun getChunksForPage(docIds: List<Long>, pageNumber: Int): List<ChunkEntity> =
+                chunkList.filter { it.documentId in docIds && it.pageNumber == pageNumber }
+            override suspend fun getChunksForPageRange(docIds: List<Long>, startPage: Int, endPage: Int): List<ChunkEntity> =
+                chunkList.filter { it.documentId in docIds && it.pageNumber in startPage..endPage }
         }
     }
 
