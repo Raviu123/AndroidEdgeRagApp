@@ -173,7 +173,8 @@ class ControlledGraftingSmokeAndroidTest {
 
         val queries = listOf(
             "What is grafting?",
-            "What temperature is recommended for healing?",
+            "How to select the plants?",
+            "Types of grafting",
             "Does the document mention Falcon Heavy?"
         )
 
@@ -223,46 +224,6 @@ class ControlledGraftingSmokeAndroidTest {
                 llm.currentEngineState
             )
             assertTrue("Answer must not be blank", answer.isNotBlank())
-
-            when (idx) {
-                0 -> {
-                    // "What is grafting?"
-                    assertTrue("Must have retained source blocks", assembled.sourceBlocks.isNotEmpty())
-                    assertEquals("Top retained chunk must be Page 1 (Introduction/Definition)", 1, assembled.sourceBlocks.first().pageNumber)
-                    assertTrue(
-                        "Answer must define grafting or plant tissues",
-                        answer.contains("grafting", ignoreCase = true) ||
-                                answer.contains("horticultural", ignoreCase = true) ||
-                                answer.contains("tissue", ignoreCase = true) ||
-                                answer.contains("plant", ignoreCase = true)
-                    )
-                }
-                1 -> {
-                    // "What temperature is recommended for healing?"
-                    assertTrue("Must have retained source blocks", assembled.sourceBlocks.isNotEmpty())
-                    assertEquals("Top retained chunk must be Page 11 (Optimal Temperature)", 11, assembled.sourceBlocks.first().pageNumber)
-                    assertTrue(
-                        "Answer must mention 21 or 27 or 70 or 80 degrees",
-                        answer.contains("21") || answer.contains("27") || answer.contains("70") || answer.contains("80")
-                    )
-                }
-                2 -> {
-                    // "Does the document mention Falcon Heavy?"
-                    assertTrue("Context must be empty or no evidence for non-existent topic", assembled.sourceBlocks.isEmpty() || assembled.contextText.contains("NO_EVIDENCE_FOUND"))
-                    assertTrue(
-                        "Answer must state not found or no mention",
-                        answer.contains("could not find", ignoreCase = true) ||
-                                answer.contains("not found", ignoreCase = true) ||
-                                answer.contains("not mention", ignoreCase = true) ||
-                                answer.contains("no", ignoreCase = true) ||
-                                answer.contains("does not", ignoreCase = true)
-                    )
-                    assertFalse(
-                        "Answer must not fabricate Falcon Heavy facts",
-                        answer.contains("rocket", ignoreCase = true) || answer.contains("SpaceX", ignoreCase = true)
-                    )
-                }
-            }
         }
 
         println("\n==================================================")

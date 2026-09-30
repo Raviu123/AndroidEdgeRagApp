@@ -3,7 +3,7 @@ package com.siddu.offlinedocai.domain.repository
 import android.content.Context
 import android.util.Log
 import com.siddu.offlinedocai.ai.embeddings.EmbeddingModel
-import com.siddu.offlinedocai.ai.embeddings.GGUFEmbeddingEngine
+import com.siddu.offlinedocai.ai.embeddings.ONNXEmbeddingEngine
 import com.siddu.offlinedocai.ai.llm.LocalLLM
 import com.siddu.offlinedocai.ai.llm.OllamaLLM
 import com.siddu.offlinedocai.ai.llm.GGUFLLM
@@ -41,7 +41,7 @@ class ChatRepository(
 
     private val messageDao: MessageDao = db.messageDao()
     private val conversationDao = db.conversationDao()
-    private val embeddingEngine: EmbeddingModel = GGUFEmbeddingEngine(context)
+    private val embeddingEngine: EmbeddingModel = ONNXEmbeddingEngine(context)
     internal val llm: LocalLLM = if (useOllama) OllamaLLM() else GGUFLLM(context)
 
     private val _chatState = MutableStateFlow<ChatState>(ChatState.Idle)
@@ -212,6 +212,7 @@ How may I help you today?
                         }
                     } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
                         Log.e("RAG_DEBUG", "LLM inference exceeded 120s threshold on device")
+                        (llm as? GGUFLLM)?.cancel()
                         throw IllegalStateException("Model generation timed out after 120 seconds. Please try again with a shorter query.")
                     } catch (t: Throwable) {
                         Log.e("RAG_DEBUG", "LLM inference encountered error: ${t.message}", t)

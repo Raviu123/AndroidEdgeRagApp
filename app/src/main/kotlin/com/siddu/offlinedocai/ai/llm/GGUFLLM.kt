@@ -144,6 +144,10 @@ class GGUFLLM(private val context: Context) : LocalLLM {
     }
 
     fun getActiveModel(): SupportedModel = activeModelType
+    
+    fun cancel() {
+        llamaRunner.cancelInference()
+    }
 
     /**
      * Safely switches the active local GGUF model.

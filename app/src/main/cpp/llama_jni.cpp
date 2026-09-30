@@ -17,6 +17,8 @@ struct LlamaModelContext {
     int thread_count = 4;
 };
 
+std::atomic<bool> g_cancel_generation(false);
+
 // Helper to add tokens to batch
 void batch_add(llama_batch & batch, llama_token id, llama_pos pos, const std::vector<llama_seq_id> & seq_ids, bool logits) {
     int i = batch.n_tokens;
@@ -132,6 +134,7 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeFree(JNIEnv* env, jobject
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jobject thiz, jlong model_context, jstring prompt, jint max_tokens, jfloat temperature) {
     auto t_entry = std::chrono::steady_clock::now();
+    g_cancel_generation.store(false);
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "JNI_ENTRY");
     __android_log_print(ANDROID_LOG_INFO, "CHAT_TRACE", "CHAT_TRACE: NATIVE_INFERENCE_ENTER");
 
@@ -228,6 +231,13 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_THREADS_BATCH=%d", model_ctx->thread_count);
 
     std::atomic<bool> decode_finished(false);
+    
+    // Check for cancellation
+    if (g_cancel_generation.load()) {
+        __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "GENERATION_CANCELLED_BEFORE_START");
+        return env->NewStringUTF("");
+    }
+
     std::thread watchdog([&decode_finished]() {
         for (int i = 0; i < 3000; ++i) { // 300 seconds (5 min) safe timeout for emulator
             if (decode_finished.load()) {
@@ -238,6 +248,7 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
         if (!decode_finished.load()) {
             __android_log_print(ANDROID_LOG_ERROR, "CHAT_PERF", "PREFILL_TIMEOUT");
             __android_log_print(ANDROID_LOG_ERROR, "CHAT_PERF", "PREFILL_STUCK=true");
+            g_cancel_generation.store(true); // force cancel
         }
     });
 
@@ -311,6 +322,11 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
 
     int tokens_generated = 0;
     while (tokens_generated < max_tokens) {
+        if (g_cancel_generation.load()) {
+            __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "GENERATION_CANCELLED");
+            break;
+        }
+
         auto t_stop_start = std::chrono::steady_clock::now();
         bool is_eos = llama_vocab_is_eog(vocab, curr_token);
         auto t_stop_end = std::chrono::steady_clock::now();
@@ -424,3 +440,10 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_siddu_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jobject thiz, jlong model_context, jstring prompt, jint max_tokens, jfloat temperature) {
     return Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(env, thiz, model_context, prompt, max_tokens, temperature);
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_siddu_offlinedocai_ai_llm_LlamaRunner_nativeCancel(JNIEnv* env, jobject thiz) {
+    g_cancel_generation.store(true);
+    __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "NATIVE_CANCEL_TRIGGERED");
+}
+

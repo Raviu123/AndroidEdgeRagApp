@@ -167,15 +167,21 @@ object ContextAssembler {
 
         // 2. Deduplicate Candidates (keep highest score if duplicate chunkId exists or text is duplicate)
         val deduplicatedMap = mutableMapOf<Pair<Long, Long>, RetrievalResult>()
-        val seenTexts = mutableSetOf<String>()
+        val seenPrefixes = mutableSetOf<String>()
         for (res in retrievedResults) {
             val key = Pair(res.chunk.documentId, res.chunk.id)
             val normalizedText = res.chunk.text.trim().lowercase()
+            val prefix = if (normalizedText.length > 40) normalizedText.substring(0, 40) else normalizedText
             val existing = deduplicatedMap[key]
+            
+            val isDuplicatePrefix = seenPrefixes.any { p -> 
+                (p.length > 20 && prefix.startsWith(p)) || (prefix.length > 20 && p.startsWith(prefix)) 
+            }
+            
             if (existing == null || res.relevanceScore > existing.relevanceScore) {
-                if (!seenTexts.contains(normalizedText) || existing != null) {
+                if (!isDuplicatePrefix || existing != null) {
                     deduplicatedMap[key] = res
-                    seenTexts.add(normalizedText)
+                    seenPrefixes.add(prefix)
                 }
             }
         }
@@ -293,12 +299,15 @@ object ContextAssembler {
 
             QueryIntent.EXHAUSTIVE_LIST -> {
                 val result = mutableListOf<RetrievalResult>()
-                val byPage = candidates.groupBy { it.chunk.pageNumber }
+                val topScore = candidates.maxOfOrNull { it.relevanceScore } ?: 0f
+                val validCandidates = if (topScore > 0f) candidates.filter { it.relevanceScore >= topScore * 0.40f } else candidates
+                
+                val byPage = validCandidates.groupBy { it.chunk.pageNumber }
                 for ((_, pageList) in byPage) {
                     val top = pageList.maxByOrNull { it.relevanceScore }
                     if (top != null) result.add(top)
                 }
-                val remaining = candidates.filter { it !in result }
+                val remaining = validCandidates.filter { it !in result }
                     .sortedByDescending { it.relevanceScore }
                 result.addAll(remaining)
                 result
@@ -306,12 +315,15 @@ object ContextAssembler {
 
             QueryIntent.FIND_ALL -> {
                 val result = mutableListOf<RetrievalResult>()
-                val byPage = candidates.groupBy { it.chunk.pageNumber }
+                val topScore = candidates.maxOfOrNull { it.relevanceScore } ?: 0f
+                val validCandidates = if (topScore > 0f) candidates.filter { it.relevanceScore >= topScore * 0.40f } else candidates
+                
+                val byPage = validCandidates.groupBy { it.chunk.pageNumber }
                 for ((_, pageList) in byPage) {
                     val top = pageList.maxByOrNull { it.relevanceScore }
                     if (top != null) result.add(top)
                 }
-                val remaining = candidates.filter { it !in result }
+                val remaining = validCandidates.filter { it !in result }
                     .sortedByDescending { it.relevanceScore }
                 result.addAll(remaining)
                 result

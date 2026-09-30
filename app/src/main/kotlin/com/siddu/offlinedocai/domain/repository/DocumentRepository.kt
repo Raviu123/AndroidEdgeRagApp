@@ -10,7 +10,7 @@ import com.siddu.offlinedocai.data.entities.DocumentEntity
 import com.siddu.offlinedocai.domain.rag.DocumentProcessor
 import com.siddu.offlinedocai.ai.chunking.TextChunker
 import com.siddu.offlinedocai.ai.embeddings.EmbeddingModel
-import com.siddu.offlinedocai.ai.embeddings.GGUFEmbeddingEngine
+import com.siddu.offlinedocai.ai.embeddings.ONNXEmbeddingEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,7 +37,7 @@ class DocumentRepository(
 
     private val chunkDao: ChunkDao = db.chunkDao()
     private val documentDao = db.documentDao()
-    private val embeddingEngine: EmbeddingModel = GGUFEmbeddingEngine(context)
+    private val embeddingEngine: EmbeddingModel = ONNXEmbeddingEngine(context)
 
     private fun getFileName(uri: Uri): String {
         var name = ""

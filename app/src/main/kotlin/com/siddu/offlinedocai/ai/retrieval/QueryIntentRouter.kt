@@ -83,7 +83,7 @@ object QueryIntentRouter {
 
     // 5. EXHAUSTIVE_LIST Patterns (All items belonging to a category)
     private val EXHAUSTIVE_LIST_REGEX = Regex(
-        """(?i)\b(?:list|give\s+me|show|extract|name)\s+(?:all(?:\s+the)?|every|the\s+complete\s+list(?:\s+of)?|the\s+entire\s+list(?:\s+of)?)\s+(.+?)(?:\?|$|\.)|\bwhat\s+are\s+all(?:\s+the)?\s+(.+?)(?:\?|$|\.)|\b(?:complete|entire)\s+list\s+of\s+(.+?)(?:\?|$|\.)|\blist\s+every\s+(.+?)\s+(?:mentioned|in\s+the\s+document)?(?:\?|$|\.)|\b(?:list|extract|name)\s+(?:all\s+)?(?:the\s+)?([a-zA-Z0-9\-_]+s)\b(?:\s+in\s+the\s+document|\?|$|\.)|\bwhat\s+are\s+the\s+([a-zA-Z0-9\-_]+s)\b(?:\s+in\s+the\s+document|\?|$|\.)"""
+        """(?i)\b(?:list|give\s+me|show|extract|name)\s+(?:all(?:\s+the)?|every|the\s+complete\s+list(?:\s+of)?|the\s+entire\s+list(?:\s+of)?)\s+(.+?)(?:\?|$|\.)|\bwhat\s+are\s+all(?:\s+the)?\s+(.+?)(?:\?|$|\.)|\b(?:complete|entire)\s+list\s+of\s+(.+?)(?:\?|$|\.)|\blist\s+every\s+(.+?)\s+(?:mentioned|in\s+the\s+document)?(?:\?|$|\.)|\b(?:list|extract|name)\s+(?:all\s+)?(?:the\s+)?([a-zA-Z0-9\-_]+s)\b(?:\s+in\s+the\s+document|\?|$|\.)|\bwhat\s+are\s+the\s+([a-zA-Z0-9\-_]+s)\b(?:\s+in\s+the\s+document|\?|$|\.)|\btypes?\s+of\s+(.+?)(?:\?|$|\.)"""
     )
 
     // 6. EXACT_FACT Patterns

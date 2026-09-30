@@ -189,4 +189,11 @@ class LlamaRunner(private val context: Context) {
     private external fun nativeInit(modelPath: String, contextSize: Int, threadCount: Int): Long
     private external fun nativeFree(modelContext: Long)
     private external fun nativeInference(modelContext: Long, prompt: String, maxTokens: Int, temperature: Float): String
+    private external fun nativeCancel()
+
+    fun cancelInference() {
+        if (isNativeLoaded) {
+            nativeCancel()
+        }
+    }
 }

@@ -950,14 +950,21 @@ class VectorStore(private val chunkDao: ChunkDao) {
                 }
 
                 var specificEvidenceBonus = 0.0
-                if (matchedTermCount > 0 || denseScore >= 0.35f) {
+                val hasLexicalRelevance = matchedTermCount > 0
+                val hasStrongSemanticRelevance = denseScore >= 0.55f
+
+                if (hasLexicalRelevance || hasStrongSemanticRelevance) {
+                    var rawBonus = 0.0
                     val entityMatches = GENERIC_ENTITY_REGEX.findAll(chunkText).toList()
                     if (entityMatches.size >= 2) {
-                        specificEvidenceBonus += 15.0 + (entityMatches.size * 3.0).coerceAtMost(20.0)
+                        rawBonus += 0.8
                     }
-                    if (COMMA_LIST_REGEX.containsMatchIn(chunkText)) {
-                        specificEvidenceBonus += 20.0
+
+                    val isListQuery = Regex("""(?i)\b(?:what\s+are|list|give\s+me|show|types|methods|steps|causes|reasons|factors|benefits|applications|different)\b""").containsMatchIn(cleanQuery)
+                    if (COMMA_LIST_REGEX.containsMatchIn(chunkText) && isListQuery) {
+                        rawBonus += 1.0
                     }
+
                     val matchedDimensionRegexes = dimensionUnitMap.entries
                         .filter { entry -> entry.key.any { dimKey -> queryKeywords.any { kw -> wordMatchesKeyword(dimKey, kw, queryStemsMap[kw] ?: setOf(kw)) } } }
                         .map { it.value }
@@ -965,24 +972,25 @@ class VectorStore(private val chunkDao: ChunkDao) {
                     if (matchedDimensionRegexes.isNotEmpty()) {
                         val matchingUnitCount = matchedDimensionRegexes.sumOf { regex -> regex.findAll(chunkText).count() }
                         if (matchingUnitCount > 0) {
-                            specificEvidenceBonus += 25.0 + (matchingUnitCount * 5.0).coerceAtMost(25.0)
+                            rawBonus += (1.5 + (matchingUnitCount * 0.5)).coerceAtMost(3.0)
                         }
                     } else if (isSpecQuery) {
                         val anyMatches = ANY_METRIC_REGEX.findAll(chunkText).toList()
                         if (anyMatches.isNotEmpty()) {
-                            specificEvidenceBonus += 15.0 + (anyMatches.size * 3.0).coerceAtMost(15.0)
+                            rawBonus += (1.0 + (anyMatches.size * 0.3)).coerceAtMost(2.0)
                         }
                     }
 
                     val listMatches = LIST_EVIDENCE_REGEX.findAll(chunkText).toList()
                     if (listMatches.size >= 2) {
-                        val isListRequest = Regex("""(?i)\b(?:what\s+are|list|give\s+me\s+all|name\s+all|which\s+are)\b""").containsMatchIn(cleanQuery)
-                        if (isListRequest) {
-                            specificEvidenceBonus += 15.0 + (listMatches.size * 3.0).coerceAtMost(25.0)
+                        rawBonus += if (isListQuery) {
+                            (1.2 + (listMatches.size * 0.3)).coerceAtMost(2.5)
                         } else {
-                            specificEvidenceBonus += 15.0
+                            0.5
                         }
                     }
+
+                    specificEvidenceBonus = minOf(4.0, rawBonus)
                 }
 
                 rerank += specificEvidenceBonus
@@ -1003,8 +1011,8 @@ class VectorStore(private val chunkDao: ChunkDao) {
 
                 cand.tier = when {
                     isAdministrativeBoilerplate -> RelevanceTier.TIER_C_BOILERPLATE_WEAK
-                    matchedTermCount == 0 && denseScore < 0.35f -> RelevanceTier.TIER_C_BOILERPLATE_WEAK
-                    (specificEvidenceBonus >= 15.0 || rerank >= 20.0) && (matchedTermCount > 0 || denseScore >= 0.35f) -> RelevanceTier.TIER_A_DIRECT_ANSWER
+                    matchedTermCount == 0 && denseScore < 0.40f -> RelevanceTier.TIER_C_BOILERPLATE_WEAK
+                    rerank >= 20.0f && (matchedTermCount > 0 || denseScore >= 0.50f) -> RelevanceTier.TIER_A_DIRECT_ANSWER
                     matchedTermCount > 0 || cand.initialScore >= 5.0f -> RelevanceTier.TIER_B_SUPPORTING_CONTEXT
                     else -> RelevanceTier.TIER_C_BOILERPLATE_WEAK
                 }
