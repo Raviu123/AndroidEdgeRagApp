@@ -972,12 +972,12 @@ class VectorStore(private val chunkDao: ChunkDao) {
                     if (matchedDimensionRegexes.isNotEmpty()) {
                         val matchingUnitCount = matchedDimensionRegexes.sumOf { regex -> regex.findAll(chunkText).count() }
                         if (matchingUnitCount > 0) {
-                            rawBonus += (1.5 + (matchingUnitCount * 0.5)).coerceAtMost(3.0)
+                            rawBonus += (10.0 + (matchingUnitCount * 2.0)).coerceAtMost(16.0)
                         }
                     } else if (isSpecQuery) {
                         val anyMatches = ANY_METRIC_REGEX.findAll(chunkText).toList()
                         if (anyMatches.isNotEmpty()) {
-                            rawBonus += (1.0 + (anyMatches.size * 0.3)).coerceAtMost(2.0)
+                            rawBonus += (3.0 + (anyMatches.size * 0.5)).coerceAtMost(6.0)
                         }
                     }
 
@@ -990,7 +990,7 @@ class VectorStore(private val chunkDao: ChunkDao) {
                         }
                     }
 
-                    specificEvidenceBonus = minOf(4.0, rawBonus)
+                    specificEvidenceBonus = minOf(16.0, rawBonus)
                 }
 
                 rerank += specificEvidenceBonus

@@ -7,6 +7,7 @@ import com.siddu.offlinedocai.ai.embeddings.ONNXEmbeddingEngine
 import com.siddu.offlinedocai.ai.llm.LocalLLM
 import com.siddu.offlinedocai.ai.llm.OllamaLLM
 import com.siddu.offlinedocai.ai.llm.GGUFLLM
+import com.siddu.offlinedocai.ai.llm.AnswerLength
 import com.siddu.offlinedocai.ai.retrieval.AssembledContext
 import com.siddu.offlinedocai.ai.retrieval.ContextAssembler
 import com.siddu.offlinedocai.ai.retrieval.QueryClassification
@@ -51,6 +52,12 @@ class ChatRepository(
     fun selectLlmModel(model: GGUFLLM.SupportedModel): Boolean {
         return if (llm is GGUFLLM) {
             llm.selectModel(model)
+        } else false
+    }
+
+    fun selectLlmModel(file: java.io.File): Boolean {
+        return if (llm is GGUFLLM) {
+            llm.selectModel(file)
         } else false
     }
 
@@ -118,11 +125,16 @@ How may I help you today?
     }
 
     /** Send a user message, run RAG or LLM, and stream the assistant response */
-    fun sendMessage(conversationId: Long, userText: String, relevantDocumentIds: List<Long>) {
+    fun sendMessage(
+        conversationId: Long,
+        userText: String,
+        relevantDocumentIds: List<Long>,
+        answerLength: AnswerLength = AnswerLength.SHORT
+    ) {
         CoroutineScope(Dispatchers.IO).launch {
             var timerJob: kotlinx.coroutines.Job? = null
             try {
-                Log.i("RAG_DEBUG", "RAG_DEBUG_01_QUERY_START: query='$userText' convId=$conversationId docIds=$relevantDocumentIds")
+                Log.i("RAG_DEBUG", "RAG_DEBUG_01_QUERY_START: query='$userText' convId=$conversationId docIds=$relevantDocumentIds lengthMode=$answerLength")
                 _chatState.value = ChatState.Retrieving
                 // Persist user message
                 val userMsg = MessageEntity(
@@ -140,7 +152,7 @@ How may I help you today?
                 // Build prompt based on whether valid documents are linked
                 var assembledContext: com.siddu.offlinedocai.ai.retrieval.AssembledContext? = null
                 val (prompt, sourcesData) = if (cleanDocIds.isEmpty()) {
-                    Pair(buildNormalPrompt(userText), null)
+                    Pair(buildNormalPrompt(userText, answerLength), null)
                 } else {
                     // Embedding of the query
                     Log.i("RAG_DEBUG", "RAG_DEBUG_02_EMBEDDING_START")
@@ -168,7 +180,7 @@ How may I help you today?
                     Log.i("RAG_DEBUG", "RAG_DEBUG_05_CONTEXT_DONE: tokens=${assembled.totalEstimatedTokens} chars=${assembled.contextText.length}")
 
                     // Build prompt
-                    val p = buildPrompt(assembled.contextText, userText)
+                    val p = buildPrompt(assembled.contextText, userText, answerLength)
                     Pair(p, assembled.sourcesJson)
                 }
 
@@ -205,7 +217,7 @@ How may I help you today?
                 } else {
                     val rawAnswer = try {
                         val deferred = kotlinx.coroutines.CoroutineScope(Dispatchers.Default).async {
-                            llm.generate(prompt)
+                            llm.generate(prompt, answerLength)
                         }
                         kotlinx.coroutines.withTimeout(120_000L) {
                             deferred.await()
@@ -263,14 +275,30 @@ How may I help you today?
                 timerJob?.cancel()
                 Log.e("RAG_DEBUG", "RAG_DEBUG_12_ERROR_STATE: error=${t.message}", t)
                 Log.e(TAG, "Chat generation failed", t)
-                val errorMsg = t.message ?: "Unknown error"
+                val rawMsg = t.message ?: "Unknown error"
+                val errorMsg = when {
+                    rawMsg.contains("is not installed", ignoreCase = true) || rawMsg.contains("model file not found", ignoreCase = true) || rawMsg.contains("Real GGUF execution required", ignoreCase = true) ->
+                        "Local LLM model is not installed. Open Settings -> Model Management and import a GGUF model."
+                    rawMsg.contains("cannot be read", ignoreCase = true) ->
+                        "Installed model cannot be read. Re-import the model."
+                    rawMsg.contains("not a valid", ignoreCase = true) || rawMsg.contains("unsupported GGUF", ignoreCase = true) ->
+                        "The selected file is not a valid or supported GGUF model."
+                    rawMsg.contains("memory", ignoreCase = true) ->
+                        "Unable to load the model because the device does not have enough available memory."
+                    rawMsg.contains("initialize the local LLM", ignoreCase = true) || rawMsg.contains("Failed to load local GGUF model", ignoreCase = true) ->
+                        "Unable to initialize the local LLM. Check the model and device compatibility."
+                    rawMsg.contains("generation failed", ignoreCase = true) ->
+                        "Local generation failed. The model remains installed, but the current generation could not be completed."
+                    else ->
+                        "An error occurred while answering: $rawMsg"
+                }
                 try {
                     messageDao.insert(
                         MessageEntity(
                             id = 0,
                             conversationId = conversationId,
                             role = "assistant",
-                            content = "An error occurred while answering: $errorMsg",
+                            content = errorMsg,
                             timestamp = System.currentTimeMillis()
                         )
                     )
@@ -287,9 +315,38 @@ How may I help you today?
         }
     }
 
-    private fun buildNormalPrompt(question: String): String {
+    private fun buildNormalPrompt(question: String, answerLength: AnswerLength = AnswerLength.SHORT): String {
+        val lengthInstruction = when (answerLength) {
+            AnswerLength.SHORT -> """
+- Give the minimum sufficient answer supported by the evidence.
+- Never invent facts.
+- Never use outside knowledge.
+- Never repeat a fact.
+- Never include irrelevant evidence.
+- Do not create empty list items.
+- Do not output headings as answers.
+- For lists, preserve all requested items.
+- Stop when the relevant evidence has been adequately covered.
+""".trimIndent()
+            AnswerLength.LONG -> """
+- Give the most complete answer that is directly relevant to the question and supported by the evidence.
+- Never invent facts.
+- Never use outside knowledge.
+- Never repeat a fact.
+- Never include irrelevant evidence.
+- Do not create empty list items.
+- Do not output headings as answers.
+- For lists, preserve every requested item with its full grounded description from the source.
+- Format lists with clean numbering (e.g. 1. Item - Description).
+- Include all items mentioned in the evidence; do not skip, truncate, or omit any item.
+- Do not repeat or duplicate items.
+- Cover additional distinct relevant evidence.
+- Stop when the relevant evidence has been adequately covered.
+""".trimIndent()
+        }
         return """
-You are a helpful offline AI assistant. Answer the user's question directly.
+[ANSWER_LENGTH: ${answerLength.name}]
+You are a helpful offline AI assistant. $lengthInstruction
 
 Question: $question
 
@@ -297,8 +354,37 @@ Answer:
 """.trimIndent()
     }
 
-    private fun buildPrompt(context: String, question: String): String {
+    private fun buildPrompt(context: String, question: String, answerLength: AnswerLength = AnswerLength.SHORT): String {
+        val lengthInstruction = when (answerLength) {
+            AnswerLength.SHORT -> """
+- Give the minimum sufficient answer supported by the evidence.
+- Never invent facts.
+- Never use outside knowledge.
+- Never repeat a fact.
+- Never include irrelevant evidence.
+- Do not create empty list items.
+- Do not output headings as answers.
+- For lists, preserve all requested items.
+- Stop when the relevant evidence has been adequately covered.
+""".trimIndent()
+            AnswerLength.LONG -> """
+- Give the most complete answer that is directly relevant to the question and supported by the evidence.
+- Never invent facts.
+- Never use outside knowledge.
+- Never repeat a fact.
+- Never include irrelevant evidence.
+- Do not create empty list items.
+- Do not output headings as answers.
+- For lists, preserve every requested item with its full grounded description from the source.
+- Format lists with clean numbering (e.g. 1. Item - Description).
+- Include all items mentioned in the evidence; do not skip, truncate, or omit any item.
+- Do not repeat or duplicate items.
+- Cover additional distinct relevant evidence.
+- Stop when the relevant evidence has been adequately covered.
+""".trimIndent()
+        }
         return """
+[ANSWER_LENGTH: ${answerLength.name}]
 You are an offline AI assistant. Use the following extracted document context to answer the user's question.
 
 Context:
@@ -306,7 +392,9 @@ $context
 
 Question: $question
 
-Answer concisely, referencing the page numbers when appropriate.
+Answer:
+$lengthInstruction
+Reference the page numbers when appropriate.
 """.trimIndent()
     }
 

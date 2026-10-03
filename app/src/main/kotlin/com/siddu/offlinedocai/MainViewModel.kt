@@ -14,8 +14,10 @@ import com.siddu.offlinedocai.domain.repository.ChatRepository
 import com.siddu.offlinedocai.domain.repository.ModelDownloader
 import com.siddu.offlinedocai.domain.repository.DownloadState
 import com.siddu.offlinedocai.ai.retrieval.VectorStore
+import com.siddu.offlinedocai.ai.llm.AnswerLength
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -51,6 +53,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val llmDownloader = ModelDownloader(application)
     val llmDownloadState: StateFlow<DownloadState> = llmDownloader.downloadState
 
+    val modelManager = com.siddu.offlinedocai.data.ai.ModelManager.getInstance(application)
+    val installedModels: StateFlow<List<com.siddu.offlinedocai.data.ai.ModelItem>> = modelManager.models
+    val activeLlmModelItem: StateFlow<com.siddu.offlinedocai.data.ai.ModelItem?> = modelManager.activeModel
+    val modelImportProgress: StateFlow<com.siddu.offlinedocai.data.ai.ImportProgress?> = modelManager.importProgress
+    val modelImportError: StateFlow<String?> = modelManager.importError
+
     val downloadedLlmModels = MutableStateFlow<List<File>>(emptyList())
     val selectedLlmModel = MutableStateFlow<File?>(null)
 
@@ -71,9 +79,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             conversationDao.getAllConversations().collect { _conversations.value = it }
         }
         checkModels()
+        // Synchronize persisted active model with ChatRepository
+        modelManager.activeModel.value?.let {
+            chatRepository.selectLlmModel(it.file)
+        }
+    }
+
+    enum class ThemeMode { SYSTEM, LIGHT, DARK }
+    private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
+    val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
+    fun setThemeMode(mode: ThemeMode) {
+        _themeMode.value = mode
     }
 
     fun checkModels() {
+        modelManager.refreshModels()
         val app = getApplication<Application>()
         // 1. Check local ONNX embedding model (or bundled in assets)
         val embedOnnxDir = File(app.filesDir, "models/embedding")
@@ -83,39 +104,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Exception) { false }
         isEmbeddingModelDownloaded.value = hasLocalEmbed || hasAssetEmbed
 
-        // 2. Check local GGUF LLM model (or bundled in assets)
-        val llmDir = File(app.filesDir, "models/llm")
-        val llmFiles = llmDir.listFiles()?.filter { it.extension.equals("gguf", ignoreCase = true) } ?: emptyList()
-        val hasAssetLlm = try {
-            app.assets.list("models/llm")?.any { it.endsWith(".gguf", ignoreCase = true) } == true
-        } catch (_: Exception) { false }
+        // 2. Check local GGUF LLM models
+        val allLlmFiles = modelManager.models.value.map { it.file }
+        downloadedLlmModels.value = allLlmFiles
+        isLlmModelDownloaded.value = allLlmFiles.isNotEmpty()
+        val active = modelManager.activeModel.value
+        selectedLlmModel.value = active?.file ?: allLlmFiles.firstOrNull()
+        if (active != null) {
+            chatRepository.selectLlmModel(active.file)
+        }
+    }
 
-        downloadedLlmModels.value = llmFiles
-        isLlmModelDownloaded.value = llmFiles.isNotEmpty() || hasAssetLlm
-        if (selectedLlmModel.value == null || !selectedLlmModel.value!!.exists()) {
-            selectedLlmModel.value = llmFiles.firstOrNull { it.name.contains("1.5b", ignoreCase = true) }
-                ?: llmFiles.firstOrNull()
+    fun importLlmModel(uri: Uri) {
+        viewModelScope.launch {
+            val result = modelManager.importModelFromUri(uri)
+            if (result.isSuccess) {
+                val item = result.getOrNull()
+                if (item != null) {
+                    selectLlmModel(item.file)
+                }
+            }
+            checkModels()
         }
     }
 
     fun selectLlmModel(file: File) {
         selectedLlmModel.value = file
-        val model = com.siddu.offlinedocai.ai.llm.GGUFLLM.SupportedModel.fromFilename(file.name)
-        if (model != null) {
-            chatRepository.selectLlmModel(model)
-        }
+        modelManager.setActiveModel(file.name)
+        chatRepository.selectLlmModel(file)
     }
 
     fun selectSupportedModel(model: com.siddu.offlinedocai.ai.llm.GGUFLLM.SupportedModel): Boolean {
-        return chatRepository.selectLlmModel(model)
+        val ok = chatRepository.selectLlmModel(model)
+        if (ok) {
+            modelManager.setActiveModel(model.filename)
+            checkModels()
+        }
+        return ok
     }
 
     fun deleteLlmModel(file: File) {
         viewModelScope.launch {
-            if (file.exists()) {
-                file.delete()
+            val removed = modelManager.removeModel(file.name)
+            if (removed) {
+                checkModels()
             }
-            checkModels()
+        }
+    }
+
+    fun deleteModelItem(item: com.siddu.offlinedocai.data.ai.ModelItem) {
+        viewModelScope.launch {
+            val removed = modelManager.removeModel(item.id)
+            if (removed) {
+                checkModels()
+            }
         }
     }
 
@@ -150,9 +192,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return chatRepository.startConversation(title, documentIds.firstOrNull())
     }
 
+    private val _selectedAnswerLength = MutableStateFlow(AnswerLength.SHORT)
+    val selectedAnswerLength: StateFlow<AnswerLength> = _selectedAnswerLength.asStateFlow()
+
+    fun setAnswerLength(length: AnswerLength) {
+        _selectedAnswerLength.value = length
+    }
+
     /** Send a message in a conversation */
-    fun sendMessage(convId: Long, text: String, docIds: List<Long>) {
-        chatRepository.sendMessage(convId, text, docIds)
+    fun sendMessage(
+        convId: Long,
+        text: String,
+        docIds: List<Long>,
+        answerLength: AnswerLength = _selectedAnswerLength.value
+    ) {
+        chatRepository.sendMessage(convId, text, docIds, answerLength)
     }
 
     // Delete a document

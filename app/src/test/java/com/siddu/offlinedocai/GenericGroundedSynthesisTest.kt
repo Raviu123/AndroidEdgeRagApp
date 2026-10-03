@@ -479,4 +479,15 @@ class GenericGroundedSynthesisTest {
             answer.contains("could not find information") || answer.contains("I searched the provided document(s)"))
         assertFalse("Must NOT hallucinate Elon Musk", answer.contains("Elon Musk"))
     }
+
+    @Test
+    fun testZ_Debug_ExtractClaims() {
+        val q = "What are the technical management processes?"
+        val res = com.siddu.offlinedocai.ai.retrieval.QueryIntentRouter.route(q)
+        println("INTENT_FOR_DOC2: " + res.intent)
+        
+        val q2 = "Where does the book discuss verification and validation?"
+        val res2 = com.siddu.offlinedocai.ai.retrieval.QueryIntentRouter.route(q2)
+        println("INTENT_FOR_DOC6: " + res2.intent)
+    }
 }

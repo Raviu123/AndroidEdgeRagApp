@@ -1,0 +1,372 @@
+﻿--------- beginning of main
+10-01 11:04:52.359 17366 17384 I System.out: ================================================================================
+10-01 11:04:52.359 17366 17384 I System.out: [REGRESSION_VAL] STARTING FINAL REAL ANDROID REGRESSION VALIDATION
+10-01 11:04:52.359 17366 17384 I System.out: ================================================================================
+10-01 11:04:52.359 17366 17384 I System.out: 
+10-01 11:04:52.359 17366 17384 I System.out: [REGRESSION_VAL] 1. INGESTION PIPELINE VERIFICATION
+10-01 11:04:52.359 17366 17384 I System.out: [REGRESSION_VAL] PDF File Path: /data/user/0/com.siddu.offlinedocai/cache/Grafting_15_Page_Guide.pdf
+10-01 11:04:52.360 17366 17384 I System.out: [REGRESSION_VAL] PDF File Size: 10344 bytes
+10-01 11:04:53.767 17366 17384 I System.out: [REGRESSION_VAL] PDFBox Extracted Pages: 15
+10-01 11:04:53.767 17366 17384 I System.out: [REGRESSION_VAL] PDFBox Extracted Total Words: 507
+10-01 11:04:53.889 17366 17384 I System.out: [REGRESSION_VAL] Document Inserted to Room: docId=1
+10-01 11:04:54.065 17366 17384 I System.out: [REGRESSION_VAL] TextChunker Chunks Created: 15
+10-01 11:05:00.427 17366 17384 I System.out: [REGRESSION_VAL] Room Persistence Verified: 15 chunks persisted in SQLite
+10-01 11:05:00.427 17366 17384 I System.out: 
+10-01 11:05:00.427 17366 17384 I System.out: [REGRESSION_VAL] MODEL VERIFICATION:
+10-01 11:05:00.427 17366 17384 I System.out: [REGRESSION_VAL] Active Model Name: QWEN_1_5B
+10-01 11:05:00.427 17366 17384 I System.out: [REGRESSION_VAL] Model File Path: /data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:05:00.427 17366 17384 I System.out: [REGRESSION_VAL] Model File Size: 1117320736 bytes
+10-01 11:05:00.429 17366 17384 I System.out: 
+10-01 11:05:00.429 17366 17384 I System.out: ================================================================================
+10-01 11:05:00.429 17366 17384 I System.out: [REGRESSION_VAL] RUNNING REAL ANDROID QUERY VALIDATION (SHORT & LONG MODES)
+10-01 11:05:00.430 17366 17384 I System.out: ================================================================================
+10-01 11:05:00.430 17366 17384 I System.out: 
+10-01 11:05:00.430 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:05:00.430 17366 17384 I System.out: [REGRESSION_VAL] QUESTION A: "What are the likely causes of grafting failure and what should I check?"
+10-01 11:05:00.430 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:05:01.509 17366 17384 I System.out: ========== TOP 10 RETRIEVED CHUNKS BEFORE FILTERING (Query: "What are the likely causes of grafting failure and what should I check?") ==========
+10-01 11:05:01.521 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  1 | Page 13 | Chunk   14 | Dense: 0.6223 | Lexical:  76.01 | ExactDef:   0.00 | RRF: 0.03279 | Final: 109.43 | Survived:  true | Preview: "Page 13: Aftercare and Maintenance. Section 13: Post-Graft C"
+10-01 11:05:01.522 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  2 | Page 14 | Chunk   15 | Dense: 0.5314 | Lexical:  73.79 | ExactDef:   0.00 | RRF: 0.03226 | Final: 107.84 | Survived:  true | Preview: "Page 14: Common Causes of Failure. Section 14: Troubleshooti"
+10-01 11:05:01.522 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  3 | Page  6 | Chunk    7 | Dense: 0.4096 | Lexical:  15.47 | ExactDef:   0.00 | RRF: 0.03078 | Final:  37.86 | Survived:  true | Preview: "Page 6: Bridge Grafting. Section 6: Bridge Grafting. Method"
+10-01 11:05:01.522 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  4 | Page  7 | Chunk    8 | Dense: 0.3553 | Lexical:  15.38 | ExactDef:   0.00 | RRF: 0.02899 | Final:  36.33 | Survived:  true | Preview: "Page 7: Side-Veneer Grafting. Section 7: Side-Veneer Graftin"
+10-01 11:05:01.522 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  5 | Page  2 | Chunk    3 | Dense: 0.3845 | Lexical:  14.86 | ExactDef:   0.00 | RRF: 0.02879 | Final:  35.70 | Survived:  true | Preview: "Page 2: Biological Mechanisms. Section 2: Vascular Cambium."
+10-01 11:05:01.523 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  6 | Page  3 | Chunk    4 | Dense: 0.3203 | Lexical:  15.40 | ExactDef:   0.00 | RRF: 0.02881 | Final:  35.61 | Survived:  true | Preview: "Page 3: Whip and Tongue Grafting. Section 3: Whip-and-Tongue"
+10-01 11:05:01.523 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  7 | Page 12 | Chunk   13 | Dense: 0.3756 | Lexical:  15.47 | ExactDef:   0.00 | RRF: 0.02988 | Final:  34.97 | Survived:  true | Preview: "Page 12: Tools and Materials. Section 12: Grafting Equipment"
+10-01 11:05:01.523 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  8 | Page  5 | Chunk    6 | Dense: 0.3299 | Lexical:  15.73 | ExactDef:   0.00 | RRF: 0.02996 | Final:  34.80 | Survived:  true | Preview: "Page 5: Bark Grafting. Section 5: Bark Grafting. Method 3: B"
+10-01 11:05:01.524 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  9 | Page 11 | Chunk   12 | Dense: 0.4370 | Lexical:  14.07 | ExactDef:   0.00 | RRF: 0.02976 | Final:  34.12 | Survived:  true | Preview: "Page 11: Environmental Conditions and Optimal Temperature. S"
+10-01 11:05:01.525 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank 10 | Page  4 | Chunk    5 | Dense: 0.2851 | Lexical:  15.44 | ExactDef:   0.00 | RRF: 0.02848 | Final:  33.34 | Survived:  true | Preview: "Page 4: Cleft Grafting. Section 4: Cleft Grafting. Method 2:"
+10-01 11:05:01.525 17366 17384 I System.out: ================================================================================
+10-01 11:05:01.527 17366 17384 I System.out: [REGRESSION_VAL] Intent: CONCEPTUAL_QUERY
+10-01 11:05:01.527 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Chunks Count: 15
+10-01 11:05:01.527 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Pages: [13, 14, 6, 7, 2, 3, 12, 5, 11, 4, 10, 9, 8, 1, 1]
+10-01 11:05:01.528 17366 17384 I System.out: [REGRESSION_VAL] Top Retrieved Page: 13 (Score: 109.430435)
+10-01 11:05:01.550 17366 17384 I System.out: [REGRESSION_VAL] Assembled Context Blocks: 2 (294 tokens)
+10-01 11:05:01.563 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What are the likely causes of grafting failure and what should I check?' intent=CONCEPTUAL_QUERY lengthMode=SHORT nativeLoaded=true
+10-01 11:05:01.568 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:05:01.568 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:05:01.569 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:05:01.569 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:05:01.569 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:05:01.569 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:05:42.919 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=128 evidenceTokens=242 formattedPromptLen=2025
+10-01 11:06:02.987 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=234
+10-01 11:06:03.146 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=265 engineState=GGUF_NATIVE usedNative=true
+10-01 11:06:03.147 17366 17384 I System.out: 
+10-01 11:06:03.147 17366 17384 I System.out: [REGRESSION_VAL] [MODE: SHORT]
+10-01 11:06:03.147 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:06:03.147 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 61595ms
+10-01 11:06:03.147 17366 17384 I System.out: [REGRESSION_VAL] Short Answer:
+10-01 11:06:03.147 17366 17384 I System.out: The likely causes of grafting failure are poor cambial contact, desiccation of tissues, grafting during incorrect physiological seasons, or pathogen infection. You should inspect the graft union, rootstock, and scion for these issues. [Source 14, Page 13] (Page 13)
+10-01 11:06:03.167 17366 17384 I System.out: [REGRESSION_VAL] Short Citations: [P13]
+10-01 11:06:03.167 17366 17384 I System.out: [REGRESSION_VAL] Short Supported Ratio: 1.0
+10-01 11:06:03.167 17366 17384 I System.out: [REGRESSION_VAL] Short Unsupported Claims Count: 1
+10-01 11:06:03.172 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What are the likely causes of grafting failure and what should I check?' intent=CONCEPTUAL_QUERY lengthMode=LONG nativeLoaded=true
+10-01 11:06:03.177 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:06:03.177 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:06:03.177 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:06:03.177 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:06:03.178 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:06:03.178 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:06:03.179 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=512 evidenceTokens=242 formattedPromptLen=3357
+10-01 11:06:23.051 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=579
+10-01 11:06:23.091 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=610 engineState=GGUF_NATIVE usedNative=true
+10-01 11:06:23.092 17366 17384 I System.out: 
+10-01 11:06:23.093 17366 17384 I System.out: [REGRESSION_VAL] [MODE: LONG]
+10-01 11:06:23.093 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:06:23.093 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 19925ms
+10-01 11:06:23.093 17366 17384 I System.out: [REGRESSION_VAL] Long Answer:
+10-01 11:06:23.093 17366 17384 I System.out: The likely causes of grafting failure include poor cambial contact, desiccation of tissues, grafting during incorrect physiological seasons, and pathogen infection. To troubleshoot graft failure, you should inspect the grafts weekly, remove suckers emerging from the rootstock below the graft union to direct vigor into the scion, and check for poor cambial contact, desiccation of tissues, grafting during incorrect physiological seasons, and pathogen infection. Additionally, ensure that the scion and rootstock are properly aligned and that the cambium tissues fuse correctly. [Source 14, Page 13] (Page 13)
+10-01 11:06:23.127 17366 17384 I System.out: [REGRESSION_VAL] Long Citations: [P13]
+10-01 11:06:23.127 17366 17384 I System.out: [REGRESSION_VAL] Long Supported Ratio: 0.6666667
+10-01 11:06:23.127 17366 17384 I System.out: [REGRESSION_VAL] Long Unsupported Claims Count: 1
+10-01 11:06:23.131 17366 17384 I System.out: 
+10-01 11:06:23.131 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:06:23.131 17366 17384 I System.out: [REGRESSION_VAL] QUESTION B: "What is grafting?"
+10-01 11:06:23.131 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:06:23.336 17366 17384 I System.out: ========== TOP 10 RETRIEVED CHUNKS BEFORE FILTERING (Query: "What is grafting?") ==========
+10-01 11:06:23.338 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  1 | Page  1 | Chunk    1 | Dense: 0.7146 | Lexical:  12.38 | ExactDef: 140.00 | RRF: 0.07071 | Final: 228.57 | Survived:  true | Preview: "Page 1: Title and Overview. Section 1: Introduction to Graft"
+10-01 11:06:23.338 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  2 | Page  1 | Chunk    2 | Dense: 0.6482 | Lexical:  13.05 | ExactDef: 140.00 | RRF: 0.06971 | Final: 225.92 | Survived:  true | Preview: "Page 1: Title and Overview. Section 1: Introduction to Graft"
+10-01 11:06:23.339 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  3 | Page  6 | Chunk    7 | Dense: 0.6507 | Lexical:  15.47 | ExactDef:  70.00 | RRF: 0.06957 | Final: 155.84 | Survived:  true | Preview: "Page 6: Bridge Grafting. Section 6: Bridge Grafting. Method"
+10-01 11:06:23.339 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  4 | Page  5 | Chunk    6 | Dense: 0.5763 | Lexical:  15.73 | ExactDef:  70.00 | RRF: 0.06942 | Final: 153.83 | Survived:  true | Preview: "Page 5: Bark Grafting. Section 5: Bark Grafting. Method 3: B"
+10-01 11:06:23.340 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  5 | Page  7 | Chunk    8 | Dense: 0.6327 | Lexical:  15.38 | ExactDef:  70.00 | RRF: 0.06754 | Final: 153.36 | Survived:  true | Preview: "Page 7: Side-Veneer Grafting. Section 7: Side-Veneer Graftin"
+10-01 11:06:23.340 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  6 | Page  4 | Chunk    5 | Dense: 0.5459 | Lexical:  15.44 | ExactDef:  70.00 | RRF: 0.06879 | Final: 152.44 | Survived:  true | Preview: "Page 4: Cleft Grafting. Section 4: Cleft Grafting. Method 2:"
+10-01 11:06:23.341 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  7 | Page  3 | Chunk    4 | Dense: 0.5294 | Lexical:  15.40 | ExactDef:  70.00 | RRF: 0.06873 | Final: 151.97 | Survived:  true | Preview: "Page 3: Whip and Tongue Grafting. Section 3: Whip-and-Tongue"
+10-01 11:06:23.341 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  8 | Page  9 | Chunk   10 | Dense: 0.5993 | Lexical:  15.07 | ExactDef:  70.00 | RRF: 0.06580 | Final: 150.79 | Survived:  true | Preview: "Page 9: Saddle Grafting. Section 9: Saddle Grafting. Method"
+10-01 11:06:23.342 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  9 | Page  8 | Chunk    9 | Dense: 0.5621 | Lexical:  15.27 | ExactDef:  70.00 | RRF: 0.06608 | Final: 150.14 | Survived:  true | Preview: "Page 8: Splice Grafting. Section 8: Splice Grafting. Method"
+10-01 11:06:23.342 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank 10 | Page  2 | Chunk    3 | Dense: 0.4967 | Lexical:  14.86 | ExactDef:  70.00 | RRF: 0.06767 | Final: 150.08 | Survived:  true | Preview: "Page 2: Biological Mechanisms. Section 2: Vascular Cambium."
+10-01 11:06:23.342 17366 17384 I System.out: ================================================================================
+10-01 11:06:23.343 17366 17384 I System.out: [REGRESSION_VAL] Intent: CONCEPTUAL_QUERY
+10-01 11:06:23.343 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Chunks Count: 11
+10-01 11:06:23.344 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Pages: [1, 1, 6, 5, 7, 4, 3, 9, 8, 2, 10]
+10-01 11:06:23.344 17366 17384 I System.out: [REGRESSION_VAL] Top Retrieved Page: 1 (Score: 228.57445)
+10-01 11:06:23.351 17366 17384 I System.out: [REGRESSION_VAL] Assembled Context Blocks: 3 (359 tokens)
+10-01 11:06:23.355 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What is grafting?' intent=CONCEPTUAL_QUERY lengthMode=SHORT nativeLoaded=true
+10-01 11:06:23.357 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:06:23.358 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:06:23.358 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:06:23.358 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:06:23.358 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:06:23.358 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:06:23.361 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=128 evidenceTokens=286 formattedPromptLen=2197
+10-01 11:06:34.724 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=178
+10-01 11:06:34.742 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=206 engineState=GGUF_NATIVE usedNative=true
+10-01 11:06:34.743 17366 17384 I System.out: 
+10-01 11:06:34.743 17366 17384 I System.out: [REGRESSION_VAL] [MODE: SHORT]
+10-01 11:06:34.743 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:06:34.743 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 11392ms
+10-01 11:06:34.743 17366 17384 I System.out: [REGRESSION_VAL] Short Answer:
+10-01 11:06:34.743 17366 17384 I System.out: Grafting is a horticultural technique where tissues of plants are joined to continue their growth together, with the upper part called the scion and the lower part the rootstock. [Source 1, Page 1] (Page 1)
+10-01 11:06:34.751 17366 17384 I System.out: [REGRESSION_VAL] Short Citations: [P1]
+10-01 11:06:34.751 17366 17384 I System.out: [REGRESSION_VAL] Short Supported Ratio: 1.0
+10-01 11:06:34.751 17366 17384 I System.out: [REGRESSION_VAL] Short Unsupported Claims Count: 0
+10-01 11:06:34.756 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What is grafting?' intent=CONCEPTUAL_QUERY lengthMode=LONG nativeLoaded=true
+10-01 11:06:34.758 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:06:34.758 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:06:34.758 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:06:34.758 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:06:34.758 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:06:34.758 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:06:34.759 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=512 evidenceTokens=286 formattedPromptLen=3529
+10-01 11:07:00.976 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=710
+10-01 11:07:01.055 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=634 engineState=GGUF_NATIVE usedNative=true
+10-01 11:07:01.056 17366 17384 I System.out: 
+10-01 11:07:01.056 17366 17384 I System.out: [REGRESSION_VAL] [MODE: LONG]
+10-01 11:07:01.056 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:07:01.056 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 26304ms
+10-01 11:07:01.056 17366 17384 I System.out: [REGRESSION_VAL] Long Answer:
+10-01 11:07:01.056 17366 17384 I System.out: Grafting is a horticultural technique where tissues of plants are joined so as to continue their growth together. The upper part of the combined plant is called the scion, while the lower part is called the rootstock. This technique is used to propagate plants and maintain their growth. Bark grafting is used for topworking mature trees when the bark is slipping in early spring, while bridge grafting is utilized to repair damaged trunks where girdling has destroyed the phloem and cambium layer. Side-veneer grafting is a widely used technique for propagating conifers and small deciduous nursery stock. [Source 1, Page 1] (Page 1)
+10-01 11:07:01.121 17366 17384 I System.out: [REGRESSION_VAL] Long Citations: [P1]
+10-01 11:07:01.121 17366 17384 I System.out: [REGRESSION_VAL] Long Supported Ratio: 0.8
+10-01 11:07:01.121 17366 17384 I System.out: [REGRESSION_VAL] Long Unsupported Claims Count: 1
+10-01 11:07:01.125 17366 17384 I System.out: 
+10-01 11:07:01.125 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:07:01.126 17366 17384 I System.out: [REGRESSION_VAL] QUESTION C: "What are the types of grafting?"
+10-01 11:07:01.126 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:07:01.243 17366 17384 I System.out: [REGRESSION_VAL] Intent: EXHAUSTIVE_LIST
+10-01 11:07:01.243 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Chunks Count: 11
+10-01 11:07:01.243 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Pages: [1, 2, 3, 5, 6, 7, 8, 9, 12, 13, 14]
+10-01 11:07:01.243 17366 17384 I System.out: [REGRESSION_VAL] Top Retrieved Page: 1 (Score: 70.0)
+10-01 11:07:01.248 17366 17384 I System.out: [REGRESSION_VAL] Assembled Context Blocks: 8 (1106 tokens)
+10-01 11:07:01.252 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What are the types of grafting?' intent=EXHAUSTIVE_LIST lengthMode=SHORT nativeLoaded=true
+10-01 11:07:01.255 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:07:01.255 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:07:01.255 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:07:01.255 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:07:01.255 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:07:01.255 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:07:01.258 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=128 evidenceTokens=911 formattedPromptLen=4827
+10-01 11:07:26.356 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=182
+10-01 11:07:26.388 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=210 engineState=GGUF_NATIVE usedNative=true
+10-01 11:07:26.389 17366 17384 I System.out: 
+10-01 11:07:26.389 17366 17384 I System.out: [REGRESSION_VAL] [MODE: SHORT]
+10-01 11:07:26.389 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:07:26.389 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 25141ms
+10-01 11:07:26.390 17366 17384 I System.out: [REGRESSION_VAL] Short Answer:
+10-01 11:07:26.390 17366 17384 I System.out: The types of grafting include whip-and-tongue grafting, cleft grafting, bark grafting, bridge grafting, side-veneer grafting, splice grafting, saddle grafting, and approach grafting. [Source 1, Page 1] (Page 1)
+10-01 11:07:26.411 17366 17384 I System.out: [REGRESSION_VAL] Short Citations: [P1]
+10-01 11:07:26.411 17366 17384 I System.out: [REGRESSION_VAL] Short Supported Ratio: 0.0
+10-01 11:07:26.411 17366 17384 I System.out: [REGRESSION_VAL] Short Unsupported Claims Count: 1
+10-01 11:07:26.416 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What are the types of grafting?' intent=EXHAUSTIVE_LIST lengthMode=LONG nativeLoaded=true
+10-01 11:07:26.420 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:07:26.420 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:07:26.420 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:07:26.420 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:07:26.420 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:07:26.420 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:07:26.424 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=512 evidenceTokens=911 formattedPromptLen=6159
+10-01 11:08:17.342 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=1210
+10-01 11:08:17.634 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=1230 engineState=GGUF_NATIVE usedNative=true
+10-01 11:08:17.635 17366 17384 I System.out: 
+10-01 11:08:17.635 17366 17384 I System.out: [REGRESSION_VAL] [MODE: LONG]
+10-01 11:08:17.635 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:08:17.635 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 51224ms
+10-01 11:08:17.635 17366 17384 I System.out: [REGRESSION_VAL] Long Answer:
+10-01 11:08:17.635 17366 17384 I System.out: The types of grafting include: 1. **Whip and Tongue Grafting**: This method involves joining two plants with similar diameters. It is commonly used for grafting fruit trees like apples and pears. 2. **Cleft Grafting**: This technique is used when the rootstock is much larger than the scion. The stock is split down the center and two scions are inserted into the cleft. 3. **Crown Grafting (Bark Grafting)**: This method is used for topworking mature trees when the bark is slipping in early spring. 4. **Bridge Grafting**: This technique is utilized to repair damaged trunks where girdling has destroyed the phloem and cambium layer. 5. **Side-Veneer Grafting**: This method is widely used for propagating conifers and small deciduous nursery stock. 6. **Splice Grafting**: This simple technique involves making diagonal cuts on both scion and stock and taping them together. 7. **Saddle Grafting**: This method involves cutting a V-notch in the rootstock and shaping the scion into a matching wedge or saddle. 8. **Approach Grafting**: This technique involves joining two independent rooted plants together until a union forms, after which the top of the rootstock and base of the scion are removed. [Source 1, Page 1] (Page 1)
+10-01 11:08:17.861 17366 17384 I System.out: [REGRESSION_VAL] Long Citations: [P1]
+10-01 11:08:17.861 17366 17384 I System.out: [REGRESSION_VAL] Long Supported Ratio: 0.5
+10-01 11:08:17.861 17366 17384 I System.out: [REGRESSION_VAL] Long Unsupported Claims Count: 9
+10-01 11:08:17.863 17366 17384 I System.out: 
+10-01 11:08:17.863 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:08:17.863 17366 17384 I System.out: [REGRESSION_VAL] QUESTION D: "What tools and materials are needed?"
+10-01 11:08:17.863 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:08:18.237 17366 17384 I System.out: ========== TOP 10 RETRIEVED CHUNKS BEFORE FILTERING (Query: "What tools and materials are needed?") ==========
+10-01 11:08:18.237 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  1 | Page 12 | Chunk   13 | Dense: 0.4555 | Lexical:  57.68 | ExactDef:   0.00 | RRF: 0.03279 | Final:  89.42 | Survived:  true | Preview: "Page 12: Tools and Materials. Section 12: Grafting Equipment"
+10-01 11:08:18.238 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  2 | Page 11 | Chunk   12 | Dense: 0.2274 | Lexical:  55.03 | ExactDef:   0.00 | RRF: 0.03226 | Final:  84.23 | Survived:  true | Preview: "Page 11: Environmental Conditions and Optimal Temperature. S"
+10-01 11:08:18.238 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  3 | Page  1 | Chunk    1 | Dense: 0.1829 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.03102 | Final: -17.66 | Survived: false | Preview: "Page 1: Title and Overview. Section 1: Introduction to Graft"
+10-01 11:08:18.238 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  4 | Page  4 | Chunk    5 | Dense: 0.2040 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.03055 | Final: -17.69 | Survived: false | Preview: "Page 4: Cleft Grafting. Section 4: Cleft Grafting. Method 2:"
+10-01 11:08:18.239 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  5 | Page  8 | Chunk    9 | Dense: 0.2274 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02996 | Final: -17.75 | Survived: false | Preview: "Page 8: Splice Grafting. Section 8: Splice Grafting. Method"
+10-01 11:08:18.239 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  6 | Page  3 | Chunk    4 | Dense: 0.1784 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02986 | Final: -18.29 | Survived: false | Preview: "Page 3: Whip and Tongue Grafting. Section 3: Whip-and-Tongue"
+10-01 11:08:18.239 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  7 | Page  2 | Chunk    3 | Dense: 0.1715 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02988 | Final: -18.35 | Survived: false | Preview: "Page 2: Biological Mechanisms. Section 2: Vascular Cambium."
+10-01 11:08:18.239 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  8 | Page  5 | Chunk    6 | Dense: 0.1816 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02963 | Final: -18.37 | Survived: false | Preview: "Page 5: Bark Grafting. Section 5: Bark Grafting. Method 3: B"
+10-01 11:08:18.240 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  9 | Page  1 | Chunk    2 | Dense: 0.1683 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02971 | Final: -18.46 | Survived: false | Preview: "Page 1: Title and Overview. Section 1: Introduction to Graft"
+10-01 11:08:18.240 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank 10 | Page  9 | Chunk   10 | Dense: 0.1878 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02927 | Final: -18.49 | Survived: false | Preview: "Page 9: Saddle Grafting. Section 9: Saddle Grafting. Method"
+10-01 11:08:18.240 17366 17384 I System.out: ================================================================================
+10-01 11:08:18.241 17366 17384 I System.out: [REGRESSION_VAL] Intent: CONCEPTUAL_QUERY
+10-01 11:08:18.242 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Chunks Count: 4
+10-01 11:08:18.242 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Pages: [12, 11, 13, 10]
+10-01 11:08:18.242 17366 17384 I System.out: [REGRESSION_VAL] Top Retrieved Page: 12 (Score: 89.4231)
+10-01 11:08:18.243 17366 17384 I System.out: [REGRESSION_VAL] Assembled Context Blocks: 2 (283 tokens)
+10-01 11:08:18.246 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What tools and materials are needed?' intent=CONCEPTUAL_QUERY lengthMode=SHORT nativeLoaded=true
+10-01 11:08:18.247 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:08:18.247 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:08:18.247 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:08:18.247 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:08:18.247 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:08:18.247 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:08:18.248 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=128 evidenceTokens=231 formattedPromptLen=1948
+10-01 11:08:27.785 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=104
+10-01 11:08:27.798 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=104 engineState=GGUF_NATIVE usedNative=true
+10-01 11:08:27.799 17366 17384 I System.out: 
+10-01 11:08:27.799 17366 17384 I System.out: [REGRESSION_VAL] [MODE: SHORT]
+10-01 11:08:27.799 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:08:27.799 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 9556ms
+10-01 11:08:27.799 17366 17384 I System.out: [REGRESSION_VAL] Short Answer:
+10-01 11:08:27.799 17366 17384 I System.out: Sharp grafting knives, budding strips, pruning shears, and grafting wax are needed. [Source 12, Page 12]
+10-01 11:08:27.807 17366 17384 I System.out: [REGRESSION_VAL] Short Citations: [P12]
+10-01 11:08:27.807 17366 17384 I System.out: [REGRESSION_VAL] Short Supported Ratio: 1.0
+10-01 11:08:27.807 17366 17384 I System.out: [REGRESSION_VAL] Short Unsupported Claims Count: 0
+10-01 11:08:27.810 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What tools and materials are needed?' intent=CONCEPTUAL_QUERY lengthMode=LONG nativeLoaded=true
+10-01 11:08:27.811 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:08:27.811 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:08:27.811 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:08:27.812 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:08:27.812 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:08:27.812 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:08:27.813 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=512 evidenceTokens=231 formattedPromptLen=3280
+10-01 11:09:04.978 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=1540
+10-01 11:09:05.022 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=329 engineState=GGUF_NATIVE usedNative=true
+10-01 11:09:05.023 17366 17384 I System.out: 
+10-01 11:09:05.023 17366 17384 I System.out: [REGRESSION_VAL] [MODE: LONG]
+10-01 11:09:05.024 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:09:05.024 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 37216ms
+10-01 11:09:05.024 17366 17384 I System.out: [REGRESSION_VAL] Long Answer:
+10-01 11:09:05.024 17366 17384 I System.out: The tools and materials needed for grafting include: 1. **Sharp Grafting Knives**: These are essential for making clean, precise cuts to the scion and rootstock. The blades should be sharp to ensure clean cuts and minimize damage to the tissues. 2. **Grafting Wax**: This is used to seal the wound. [Source 12, Page 11] (Page 11)
+10-01 11:09:05.099 17366 17384 I System.out: [REGRESSION_VAL] Long Citations: [P11]
+10-01 11:09:05.099 17366 17384 I System.out: [REGRESSION_VAL] Long Supported Ratio: 0.6
+10-01 11:09:05.099 17366 17384 I System.out: [REGRESSION_VAL] Long Unsupported Claims Count: 2
+10-01 11:09:05.100 17366 17384 I System.out: 
+10-01 11:09:05.100 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:09:05.100 17366 17384 I System.out: [REGRESSION_VAL] QUESTION E: "What temperature is recommended for healing?"
+10-01 11:09:05.100 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:09:05.566 17366 17384 I System.out: ========== TOP 10 RETRIEVED CHUNKS BEFORE FILTERING (Query: "What temperature is recommended for healing?") ==========
+10-01 11:09:05.566 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  1 | Page 11 | Chunk   12 | Dense: 0.6426 | Lexical:  55.03 | ExactDef:   0.00 | RRF: 0.03279 | Final:  91.64 | Survived:  true | Preview: "Page 11: Environmental Conditions and Optimal Temperature. S"
+10-01 11:09:05.567 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  2 | Page 10 | Chunk   11 | Dense: 0.4074 | Lexical:  52.11 | ExactDef:   0.00 | RRF: 0.03226 | Final:  86.11 | Survived:  true | Preview: "Page 10: Approach Grafting. Section 10: Approach Grafting. M"
+10-01 11:09:05.567 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  3 | Page  2 | Chunk    3 | Dense: 0.2331 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.03126 | Final: -17.04 | Survived: false | Preview: "Page 2: Biological Mechanisms. Section 2: Vascular Cambium."
+10-01 11:09:05.567 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  4 | Page 12 | Chunk   13 | Dense: 0.2305 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02932 | Final: -18.03 | Survived: false | Preview: "Page 12: Tools and Materials. Section 12: Grafting Equipment"
+10-01 11:09:05.567 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  5 | Page  1 | Chunk    2 | Dense: 0.1430 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.03055 | Final: -18.30 | Survived: false | Preview: "Page 1: Title and Overview. Section 1: Introduction to Graft"
+10-01 11:09:05.567 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  6 | Page 13 | Chunk   14 | Dense: 0.1826 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02890 | Final: -18.72 | Survived: false | Preview: "Page 13: Aftercare and Maintenance. Section 13: Post-Graft C"
+10-01 11:09:05.567 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  7 | Page  1 | Chunk    1 | Dense: 0.1150 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.03016 | Final: -18.77 | Survived: false | Preview: "Page 1: Title and Overview. Section 1: Introduction to Graft"
+10-01 11:09:05.568 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  8 | Page  3 | Chunk    4 | Dense: 0.1252 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02986 | Final: -18.82 | Survived: false | Preview: "Page 3: Whip and Tongue Grafting. Section 3: Whip-and-Tongue"
+10-01 11:09:05.568 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  9 | Page 14 | Chunk   15 | Dense: 0.1636 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02848 | Final: -19.12 | Survived: false | Preview: "Page 14: Common Causes of Failure. Section 14: Troubleshooti"
+10-01 11:09:05.569 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank 10 | Page  6 | Chunk    7 | Dense: 0.1198 | Lexical:   0.00 | ExactDef:   0.00 | RRF: 0.02899 | Final: -19.31 | Survived: false | Preview: "Page 6: Bridge Grafting. Section 6: Bridge Grafting. Method"
+10-01 11:09:05.569 17366 17384 I System.out: ================================================================================
+10-01 11:09:05.574 17366 17384 I System.out: [REGRESSION_VAL] Intent: EXACT_FACT
+10-01 11:09:05.574 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Chunks Count: 2
+10-01 11:09:05.574 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Pages: [11, 10]
+10-01 11:09:05.574 17366 17384 I System.out: [REGRESSION_VAL] Top Retrieved Page: 11 (Score: 191.64465)
+10-01 11:09:05.577 17366 17384 I System.out: [REGRESSION_VAL] Assembled Context Blocks: 2 (323 tokens)
+10-01 11:09:05.582 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What temperature is recommended for healing?' intent=EXACT_FACT lengthMode=SHORT nativeLoaded=true
+10-01 11:09:05.584 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:09:05.584 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:09:05.586 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:09:05.586 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:09:05.586 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:09:05.587 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:09:05.588 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=128 evidenceTokens=271 formattedPromptLen=2098
+10-01 11:09:15.729 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=89
+10-01 11:09:15.736 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=120 engineState=GGUF_NATIVE usedNative=true
+10-01 11:09:15.737 17366 17384 I System.out: 
+10-01 11:09:15.737 17366 17384 I System.out: [REGRESSION_VAL] [MODE: SHORT]
+10-01 11:09:15.737 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:09:15.737 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 10159ms
+10-01 11:09:15.737 17366 17384 I System.out: [REGRESSION_VAL] Short Answer:
+10-01 11:09:15.737 17366 17384 I System.out: The optimal healing temperature for grafting callus formation is 21C to 27C (70F to 80F). [Source 11, Page 10] (Page 10)
+10-01 11:09:15.742 17366 17384 I System.out: [REGRESSION_VAL] Short Citations: [P10]
+10-01 11:09:15.742 17366 17384 I System.out: [REGRESSION_VAL] Short Supported Ratio: 1.0
+10-01 11:09:15.742 17366 17384 I System.out: [REGRESSION_VAL] Short Unsupported Claims Count: 0
+10-01 11:09:15.745 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='What temperature is recommended for healing?' intent=EXACT_FACT lengthMode=LONG nativeLoaded=true
+10-01 11:09:15.747 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:09:15.747 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:09:15.747 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:09:15.747 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:09:15.747 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:09:15.747 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:09:15.749 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=512 evidenceTokens=271 formattedPromptLen=3430
+10-01 11:09:30.794 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=178
+10-01 11:09:30.807 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=209 engineState=GGUF_NATIVE usedNative=true
+10-01 11:09:30.808 17366 17384 I System.out: 
+10-01 11:09:30.808 17366 17384 I System.out: [REGRESSION_VAL] [MODE: LONG]
+10-01 11:09:30.808 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:09:30.808 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 15066ms
+10-01 11:09:30.808 17366 17384 I System.out: [REGRESSION_VAL] Long Answer:
+10-01 11:09:30.808 17366 17384 I System.out: The optimal healing temperature for grafting callus formation is 21C to 27C (70F to 80F). Humidity must be maintained above 85% to prevent desiccation during the healing process. [Source 11, Page 10] (Page 10)
+10-01 11:09:30.817 17366 17384 I System.out: [REGRESSION_VAL] Long Citations: [P10]
+10-01 11:09:30.817 17366 17384 I System.out: [REGRESSION_VAL] Long Supported Ratio: 1.0
+10-01 11:09:30.817 17366 17384 I System.out: [REGRESSION_VAL] Long Unsupported Claims Count: 0
+10-01 11:09:30.818 17366 17384 I System.out: 
+10-01 11:09:30.818 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:09:30.818 17366 17384 I System.out: [REGRESSION_VAL] QUESTION F: "List all methods of grafting described in the guide."
+10-01 11:09:30.818 17366 17384 I System.out: --------------------------------------------------------------------------------
+10-01 11:09:31.252 17366 17384 I System.out: ========== TOP 10 RETRIEVED CHUNKS BEFORE FILTERING (Query: "List all methods of grafting described in the guide.") ==========
+10-01 11:09:31.252 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  1 | Page  6 | Chunk    7 | Dense: 0.5761 | Lexical:  33.08 | ExactDef:   0.00 | RRF: 0.03175 | Final:  67.61 | Survived:  true | Preview: "Page 6: Bridge Grafting. Section 6: Bridge Grafting. Method"
+10-01 11:09:31.252 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  2 | Page  7 | Chunk    8 | Dense: 0.5825 | Lexical:  32.76 | ExactDef:   0.00 | RRF: 0.03202 | Final:  67.49 | Survived:  true | Preview: "Page 7: Side-Veneer Grafting. Section 7: Side-Veneer Graftin"
+10-01 11:09:31.253 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  3 | Page  3 | Chunk    4 | Dense: 0.5403 | Lexical:  33.52 | ExactDef:   0.00 | RRF: 0.03110 | Final:  67.07 | Survived:  true | Preview: "Page 3: Whip and Tongue Grafting. Section 3: Whip-and-Tongue"
+10-01 11:09:31.253 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  4 | Page  8 | Chunk    9 | Dense: 0.5464 | Lexical:  32.34 | ExactDef:   0.00 | RRF: 0.03077 | Final:  63.99 | Survived:  true | Preview: "Page 8: Splice Grafting. Section 8: Splice Grafting. Method"
+10-01 11:09:31.253 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  5 | Page  5 | Chunk    6 | Dense: 0.4929 | Lexical:  33.10 | ExactDef:   0.00 | RRF: 0.02983 | Final:  63.74 | Survived:  true | Preview: "Page 5: Bark Grafting. Section 5: Bark Grafting. Method 3: B"
+10-01 11:09:31.254 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  6 | Page  9 | Chunk   10 | Dense: 0.5409 | Lexical:  31.64 | ExactDef:   0.00 | RRF: 0.02985 | Final:  62.78 | Survived:  true | Preview: "Page 9: Saddle Grafting. Section 9: Saddle Grafting. Method"
+10-01 11:09:31.254 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  7 | Page  4 | Chunk    5 | Dense: 0.5003 | Lexical:  32.02 | ExactDef:   0.00 | RRF: 0.02904 | Final:  62.34 | Survived:  true | Preview: "Page 4: Cleft Grafting. Section 4: Cleft Grafting. Method 2:"
+10-01 11:09:31.255 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  8 | Page  2 | Chunk    3 | Dense: 0.5144 | Lexical:  29.93 | ExactDef:   0.00 | RRF: 0.02899 | Final:  62.17 | Survived:  true | Preview: "Page 2: Biological Mechanisms. Section 2: Vascular Cambium."
+10-01 11:09:31.255 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank  9 | Page 10 | Chunk   11 | Dense: 0.5442 | Lexical:  25.26 | ExactDef:   0.00 | RRF: 0.02964 | Final:  56.32 | Survived:  true | Preview: "Page 10: Approach Grafting. Section 10: Approach Grafting. M"
+10-01 11:09:31.255 17366 17384 I System.out: [RETRIEVAL_TOP10] Rank 10 | Page 12 | Chunk   13 | Dense: 0.5788 | Lexical:  15.47 | ExactDef:   0.00 | RRF: 0.03041 | Final:  37.27 | Survived:  true | Preview: "Page 12: Tools and Materials. Section 12: Grafting Equipment"
+10-01 11:09:31.255 17366 17384 I System.out: ================================================================================
+10-01 11:09:31.256 17366 17384 I System.out: [REGRESSION_VAL] Intent: EXHAUSTIVE_LIST
+10-01 11:09:31.256 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Chunks Count: 15
+10-01 11:09:31.256 17366 17384 I System.out: [REGRESSION_VAL] Retrieved Pages: [6, 7, 3, 8, 5, 9, 4, 2, 10, 12, 11, 13, 1, 1, 14]
+10-01 11:09:31.256 17366 17384 I System.out: [REGRESSION_VAL] Top Retrieved Page: 6 (Score: 67.61106)
+10-01 11:09:31.262 17366 17384 I System.out: [REGRESSION_VAL] Assembled Context Blocks: 8 (1139 tokens)
+10-01 11:09:31.268 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='List all methods of grafting described in the guide.' intent=EXHAUSTIVE_LIST lengthMode=SHORT nativeLoaded=true
+10-01 11:09:31.271 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:09:31.271 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:09:31.271 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:09:31.271 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:09:31.271 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:09:31.271 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:09:31.274 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=128 evidenceTokens=944 formattedPromptLen=4963
+10-01 11:09:58.619 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=219
+10-01 11:09:58.773 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=247 engineState=GGUF_NATIVE usedNative=true
+10-01 11:09:58.774 17366 17384 I System.out: 
+10-01 11:09:58.774 17366 17384 I System.out: [REGRESSION_VAL] [MODE: SHORT]
+10-01 11:09:58.775 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:09:58.775 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 27511ms
+10-01 11:09:58.775 17366 17384 I System.out: [REGRESSION_VAL] Short Answer:
+10-01 11:09:58.775 17366 17384 I System.out: The guide describes the following methods of grafting:
+10-01 11:09:58.775 17366 17384 I System.out: 1. Whip-and-tongue grafting
+10-01 11:09:58.775 17366 17384 I System.out: 2. Cleft grafting
+10-01 11:09:58.775 17366 17384 I System.out: 3. Bark grafting
+10-01 11:09:58.775 17366 17384 I System.out: 4. Bridge grafting
+10-01 11:09:58.775 17366 17384 I System.out: 5. Side-veneer grafting
+10-01 11:09:58.775 17366 17384 I System.out: 6. Splice grafting
+10-01 11:09:58.775 17366 17384 I System.out: 7. Saddle grafting
+10-01 11:09:58.775 17366 17384 I System.out: 8. Approach grafting [Source 3, Page 2] (Page 2)
+10-01 11:09:58.847 17366 17384 I System.out: [REGRESSION_VAL] Short Citations: [P2]
+10-01 11:09:58.847 17366 17384 I System.out: [REGRESSION_VAL] Short Supported Ratio: 0.875
+10-01 11:09:58.847 17366 17384 I System.out: [REGRESSION_VAL] Short Unsupported Claims Count: 1
+10-01 11:09:58.855 17366 17386 I RAG_DEBUG: RAG_DEBUG_06_LLM_START: q='List all methods of grafting described in the guide.' intent=EXHAUSTIVE_LIST lengthMode=LONG nativeLoaded=true
+10-01 11:09:58.858 17366 17386 I System.out: MODEL_PATH=/data/local/tmp/models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:09:58.858 17366 17386 I System.out: MODEL_FILENAME=qwen2.5-1.5b-instruct-q4_k_m.gguf
+10-01 11:09:58.858 17366 17386 I System.out: MODEL_FILE_SIZE=1117320736 bytes
+10-01 11:09:58.858 17366 17386 I System.out: MODEL_ARCHITECTURE=qwen2
+10-01 11:09:58.858 17366 17386 I System.out: MODEL_PARAMETER_COUNT=1.54B
+10-01 11:09:58.858 17366 17386 I System.out: ENGINE_STATE=GGUF_NATIVE
+10-01 11:09:58.862 17366 17386 I RAG_DEBUG: RAG_DEBUG_07_NATIVE_START: model=qwen2.5-1.5b-instruct-q4_k_m.gguf maxTokens=512 evidenceTokens=944 formattedPromptLen=6295
+10-01 11:11:02.370 17366 17386 I RAG_DEBUG: RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=1781
+10-01 11:11:02.737 17366 17386 I RAG_DEBUG: RAG_DEBUG_09_LLM_RETURN: finalLen=1504 engineState=GGUF_NATIVE usedNative=true
+10-01 11:11:02.738 17366 17384 I System.out: 
+10-01 11:11:02.738 17366 17384 I System.out: [REGRESSION_VAL] [MODE: LONG]
+10-01 11:11:02.738 17366 17384 I System.out: [REGRESSION_VAL] Engine State: GGUF_NATIVE
+10-01 11:11:02.738 17366 17384 I System.out: [REGRESSION_VAL] Generation Latency: 63891ms
+10-01 11:11:02.738 17366 17384 I System.out: [REGRESSION_VAL] Long Answer:
+10-01 11:11:02.738 17366 17384 I System.out: The guide describes the following methods of grafting: 1. **Whip-and-Tongue Grafting**: - **Description**: One of the oldest methods of grafting, commonly used for grafting fruit trees such as apples and pears where the scion and rootstock have equal diameter. - **Method**: The rootstock and scion are placed in contact with each other, and both tissues are kept alive until the graft has taken, usually a period of several weeks. 2. **Cleft Grafting**: - **Description**: Used when the rootstock is much larger than the scion. - **Method**: The stock is split down the center and two scions are inserted into the cleft. 3. **Bark Grafting**: - **Description**: Used for topworking mature trees when the bark is slipping in early spring. - **Method**: Bark grafting involves cutting a V-notch in the rootstock and shaping the scion into a matching wedge or saddle. 4. **Bridge Grafting**: - **Method**: Bridge grafting involves repairing the damaged trunk by cutting a V-notch in the rootstock and shaping the scion into a matching wedge or saddle. 5. **Side-Veneer Grafting**: - **Method**: Side-veneer grafting involves making simple diagonal cuts on both scion and stock and taping them together. 6. **Splice Grafting**: - **Description**: A simple technique where simple diagonal cuts are made on both scion and stock and taped together. - **Method**: Splice grafting involves making diagonal cuts on both scion and stock and taping them together. 7. **Saddle Grafting**: [Source 3, Page 2] (Page 2)
+10-01 11:11:03.040 17366 17384 I System.out: [REGRESSION_VAL] Long Citations: [P2]
+10-01 11:11:03.040 17366 17384 I System.out: [REGRESSION_VAL] Long Supported Ratio: 0.5555556
+10-01 11:11:03.040 17366 17384 I System.out: [REGRESSION_VAL] Long Unsupported Claims Count: 8

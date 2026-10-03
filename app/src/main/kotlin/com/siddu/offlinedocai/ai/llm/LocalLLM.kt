@@ -9,4 +9,11 @@ interface LocalLLM {
      * generated text, or throws an exception if generation fails.
      */
     suspend fun generate(prompt: String): String
+
+    /**
+     * Generate a response for [prompt] respecting the desired [answerLength].
+     * Defaults to calling [generate(prompt)].
+     */
+    suspend fun generate(prompt: String, answerLength: AnswerLength): String = generate(prompt)
 }
+

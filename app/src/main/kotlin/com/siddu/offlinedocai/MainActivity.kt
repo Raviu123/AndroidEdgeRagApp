@@ -17,11 +17,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import com.siddu.offlinedocai.ai.llm.AnswerLength
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,53 +73,62 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OfflineDocAIApp(mainViewModel: MainViewModel = viewModel()) {
-    val navController = rememberNavController()
-    val items = listOf(
-        NavItem("home", "Home", Icons.Default.Home),
-        NavItem("chats", "Chats", Icons.Default.Chat),
-        NavItem("documents", "Documents", Icons.Default.Description),
-        NavItem("settings", "Settings", Icons.Default.Settings)
-    )
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                val currentDestination = navController.currentBackStackEntryAsState().value?.destination
-                items.forEach { item ->
-                    NavigationBarItem(
-                        icon = { Icon(item.icon, contentDescription = item.label) },
-                        label = { Text(item.label) },
-                        selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
-                        onClick = {
-                            navController.navigate(item.route) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
+    val themeMode by mainViewModel.themeMode.collectAsState()
+    val isDark = when (themeMode) {
+        MainViewModel.ThemeMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
+        MainViewModel.ThemeMode.DARK -> true
+        MainViewModel.ThemeMode.LIGHT -> false
+    }
+
+    MaterialTheme(colorScheme = if (isDark) darkColorScheme() else lightColorScheme()) {
+        val navController = rememberNavController()
+        val items = listOf(
+            NavItem("home", "Home", Icons.Default.Home),
+            NavItem("chats", "Chats", Icons.Default.Chat),
+            NavItem("documents", "Documents", Icons.Default.Description),
+            NavItem("settings", "Settings", Icons.Default.Settings)
+        )
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    val currentDestination = navController.currentBackStackEntryAsState().value?.destination
+                    items.forEach { item ->
+                        NavigationBarItem(
+                            icon = { Icon(item.icon, contentDescription = item.label) },
+                            label = { Text(item.label) },
+                            selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
+                            onClick = {
+                                navController.navigate(item.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
-        }
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = "home",
-            modifier = Modifier.padding(innerPadding)
-        ) {
-            composable("home") { HomeScreen(mainViewModel, navController) }
-            composable("chats") { ChatsScreen(mainViewModel, navController) }
-            composable("documents") { DocumentsScreen(mainViewModel, navController) }
-            composable("settings") { SettingsScreen(mainViewModel) }
-            composable("documentDetail/{docId}") { backStackEntry ->
-                val docId = backStackEntry.arguments?.getString("docId")?.toLongOrNull() ?: return@composable
-                DocumentDetailScreen(docId, mainViewModel, navController)
+        ) { innerPadding ->
+            NavHost(
+                navController = navController,
+                startDestination = "home",
+                modifier = Modifier.padding(innerPadding)
+            ) {
+                composable("home") { HomeScreen(mainViewModel, navController) }
+                composable("chats") { ChatsScreen(mainViewModel, navController) }
+                composable("documents") { DocumentsScreen(mainViewModel, navController) }
+                composable("settings") { SettingsScreen(mainViewModel) }
+                composable("documentDetail/{docId}") { backStackEntry ->
+                    val docId = backStackEntry.arguments?.getString("docId")?.toLongOrNull() ?: return@composable
+                    DocumentDetailScreen(docId, mainViewModel, navController)
+                }
+                composable("chat/{convId}") { backStackEntry ->
+                    val convId = backStackEntry.arguments?.getString("convId")?.toLongOrNull() ?: return@composable
+                    ChatScreen(convId, mainViewModel, navController)
+                }
+                composable("newChat") { NewChatScreen(mainViewModel, navController) }
+                composable("importProcessing") { ImportProcessingScreen(mainViewModel, navController) }
             }
-            composable("chat/{convId}") { backStackEntry ->
-                val convId = backStackEntry.arguments?.getString("convId")?.toLongOrNull() ?: return@composable
-                ChatScreen(convId, mainViewModel, navController)
-            }
-            composable("newChat") { NewChatScreen(mainViewModel, navController) }
-            composable("importProcessing") { ImportProcessingScreen(mainViewModel, navController) }
         }
     }
 }
@@ -653,6 +664,8 @@ fun ChatScreen(convId: Long, viewModel: MainViewModel, navController: NavHostCon
     val messages by viewModel.messagesForConversation(convId).collectAsState()
     val chatState by viewModel.chatState.collectAsState()
     var textInput by remember { mutableStateOf("") }
+    val selectedAnswerLength by viewModel.selectedAnswerLength.collectAsState()
+    var lengthMenuExpanded by remember { mutableStateOf(false) }
 
     val linkedDocIds = chat?.documentId?.let { listOf(it) } ?: emptyList()
 
@@ -819,13 +832,53 @@ fun ChatScreen(convId: Long, viewModel: MainViewModel, navController: NavHostCon
                     value = textInput,
                     onValueChange = { textInput = it },
                     placeholder = { Text("Ask about document...") },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    maxLines = 3
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Box {
+                    OutlinedButton(
+                        onClick = { lengthMenuExpanded = true },
+                        modifier = Modifier.height(48.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (selectedAnswerLength == AnswerLength.SHORT) "Short ▾" else "Long ▾",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = lengthMenuExpanded,
+                        onDismissRequest = { lengthMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Short") },
+                            onClick = {
+                                viewModel.setAnswerLength(AnswerLength.SHORT)
+                                lengthMenuExpanded = false
+                            },
+                            trailingIcon = if (selectedAnswerLength == AnswerLength.SHORT) {
+                                { Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.size(16.dp)) }
+                            } else null
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Long") },
+                            onClick = {
+                                viewModel.setAnswerLength(AnswerLength.LONG)
+                                lengthMenuExpanded = false
+                            },
+                            trailingIcon = if (selectedAnswerLength == AnswerLength.LONG) {
+                                { Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.size(16.dp)) }
+                            } else null
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(4.dp))
                 IconButton(
                     onClick = {
                         if (textInput.isNotBlank()) {
-                            viewModel.sendMessage(convId, textInput, linkedDocIds)
+                            viewModel.sendMessage(convId, textInput, linkedDocIds, selectedAnswerLength)
                             textInput = ""
                         }
                     },
@@ -841,70 +894,289 @@ fun ChatScreen(convId: Long, viewModel: MainViewModel, navController: NavHostCon
 @Composable
 fun SettingsScreen(viewModel: MainViewModel) {
     val isEmbedDownloaded by viewModel.isEmbeddingModelDownloaded.collectAsState()
-    val isLlmDownloaded by viewModel.isLlmModelDownloaded.collectAsState()
-    val downloadedLlmModels by viewModel.downloadedLlmModels.collectAsState()
-    val selectedLlmModel by viewModel.selectedLlmModel.collectAsState()
-    val llmDownloadState by viewModel.llmDownloadState.collectAsState()
+    val installedModels by viewModel.installedModels.collectAsState()
+    val activeModelItem by viewModel.activeLlmModelItem.collectAsState()
+    val importProgress by viewModel.modelImportProgress.collectAsState()
+    val importError by viewModel.modelImportError.collectAsState()
+    val themeMode by viewModel.themeMode.collectAsState()
 
-    Column(
+    var modelPendingDeletion by remember { mutableStateOf<com.siddu.offlinedocai.data.ai.ModelItem?>(null) }
+
+    val importModelLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importLlmModel(uri)
+        }
+    }
+
+    if (modelPendingDeletion != null) {
+        val target = modelPendingDeletion!!
+        AlertDialog(
+            onDismissRequest = { modelPendingDeletion = null },
+            title = { Text("Remove Model") },
+            text = { Text("Are you sure you want to remove '${target.filename}' (${target.sizeBytes / (1024 * 1024)} MB) from device storage?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteModelItem(target)
+                        modelPendingDeletion = null
+                    }
+                ) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { modelPendingDeletion = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Settings & Model Management", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Text("Embedding Model:", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Card(modifier = Modifier.fillMaxWidth()) {
+        item {
+            Text("Settings & Model Management", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text("100% On-Device Local AI Pipeline", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        }
+
+        // 1. Theme Configuration
+        item {
+            Text("Appearance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(8.dp))
             Row(
-                modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("all-MiniLM-L6-v2 (Embedding)")
-                Text(if (isEmbedDownloaded) "Ready" else "Downloading...", color = if (isEmbedDownloaded) Color(0xFF4CAF50) else Color(0xFFFF9800))
+                MainViewModel.ThemeMode.values().forEach { mode ->
+                    val selected = themeMode == mode
+                    FilterChip(
+                        selected = selected,
+                        onClick = { viewModel.setThemeMode(mode) },
+                        label = {
+                            Text(when (mode) {
+                                MainViewModel.ThemeMode.SYSTEM -> "System"
+                                MainViewModel.ThemeMode.LIGHT -> "Light"
+                                MainViewModel.ThemeMode.DARK -> "Dark"
+                            })
+                        },
+                        leadingIcon = if (selected) {
+                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-        Text("Downloaded Local Language Models (SLMs):", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(8.dp))
+        // 2. Embedding Model Card
+        item {
+            Text("Embedding Engine", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("all-MiniLM-L6-v2", fontWeight = FontWeight.Bold)
+                        Text("ONNX Runtime • 384 dimensions", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Surface(
+                        color = if (isEmbedDownloaded) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = if (isEmbedDownloaded) "READY" else "MISSING",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            color = if (isEmbedDownloaded) Color(0xFF2E7D32) else Color(0xFFC62828),
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+            }
+        }
 
-        if (downloadedLlmModels.isEmpty()) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Text("No SLM models downloaded yet. Download one below.", modifier = Modifier.padding(16.dp), color = Color.Gray)
+        // 3. Local GGUF LLM Models Section
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("LOCAL LLM MODELS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (installedModels.isNotEmpty()) {
+                    Text("${installedModels.size} installed", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                }
+            }
+        }
+
+        // Import in progress card
+        if (importProgress != null) {
+            val prog = importProgress!!
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Importing GGUF Model...", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(prog.filename, style = MaterialTheme.typography.bodySmall)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = if (prog.percent > 0) prog.percent / 100f else 0.05f,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        val copiedMb = prog.bytesCopied / (1024 * 1024)
+                        val totalMb = prog.totalBytes / (1024 * 1024)
+                        Text(
+                            text = if (totalMb > 0) "$copiedMb MB / $totalMb MB (${prog.percent}%)" else "$copiedMb MB copied",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
+        }
+
+        // Import error alert
+        if (importError != null) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("⚠️ Import Failed", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(importError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = { viewModel.modelManager.clearImportError() }) {
+                            Text("Dismiss", color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Installed Models List
+        if (installedModels.isEmpty()) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("No GGUF Model Installed", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "OfflineDocAI requires a local GGUF model for generative neural inference.\nTarget: qwen2.5-1.5b-instruct-q4_k_m.gguf (1.1 GB).\n\nTap '+ Import GGUF Model' below to select the file from your device storage.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                }
             }
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                downloadedLlmModels.forEach { file ->
-                    val isSelected = selectedLlmModel?.name == file.name
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.selectLlmModel(file) }
-                    ) {
+            items(installedModels) { model ->
+                val isActive = model.isActive
+                val sizeMb = model.sizeBytes / (1024 * 1024)
+                val sizeGb = String.format(java.util.Locale.US, "%.2f", model.sizeBytes / (1024.0 * 1024.0 * 1024.0))
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(file.name, fontWeight = FontWeight.Bold)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = if (isSelected) "Active for Chat" else "Tap to Select",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray
-                                )
+                            Text(
+                                text = model.filename,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isActive) {
+                                Surface(
+                                    color = Color(0xFF2E7D32),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = "ACTIVE MODEL",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
                             }
-                            IconButton(onClick = { viewModel.deleteLlmModel(file) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Model", tint = Color.Red)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("Display Name: ${model.displayName}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                        Text("Status: ${if (isActive) "Active / Loaded" else model.status.name.lowercase().replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.bodySmall)
+                        Text("Size: $sizeMb MB ($sizeGb GB)", style = MaterialTheme.typography.bodySmall)
+                        Text("Type: GGUF", style = MaterialTheme.typography.bodySmall)
+                        Text("Architecture: ${model.architecture} • Quantization: ${model.quantization}", style = MaterialTheme.typography.bodySmall)
+                        if (model.parameterCount.isNotBlank()) {
+                            Text("Parameters: ${model.parameterCount}", style = MaterialTheme.typography.bodySmall)
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (!isActive) {
+                                Button(
+                                    onClick = { viewModel.selectLlmModel(model.file) },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Use as active model")
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = {},
+                                    enabled = false,
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Active")
+                                }
+                            }
+
+                            val isGenerating = viewModel.modelManager.isGenerationActive()
+                            IconButton(
+                                onClick = { modelPendingDeletion = model },
+                                enabled = !isGenerating
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Remove Model",
+                                    tint = if (!isGenerating) MaterialTheme.colorScheme.error else Color.Gray
+                                )
                             }
                         }
                     }
@@ -912,48 +1184,19 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-        Text("Download Additional Models:", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = {
-                viewModel.downloadLlmModel(
-                    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
-                    "qwen2.5-1.5b-instruct-q4_k_m.gguf"
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Download Qwen 2.5 1.5B (Default / Production) (1.1 GB)")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = {
-                viewModel.downloadLlmModel(
-                    "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-                    "qwen2.5-0.5b-instruct-q4_k_m.gguf"
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Download Qwen 2.5 0.5B (390 MB)")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = {
-                viewModel.downloadLlmModel(
-                    "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-                    "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Download Llama 3.2 1B (700 MB)")
+        // Import GGUF Model Action
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+            Button(
+                onClick = { importModelLauncher.launch(arrayOf("*/*")) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("+ Import GGUF Model")
+            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

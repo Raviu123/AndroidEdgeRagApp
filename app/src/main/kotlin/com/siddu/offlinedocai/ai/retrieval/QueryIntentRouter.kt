@@ -78,12 +78,12 @@ object QueryIntentRouter {
 
     // 4. FIND_ALL Patterns (All occurrences/mentions of a specific target)
     private val FIND_ALL_REGEX = Regex(
-        """(?i)\b(?:find|show|list|get)\s+(?:every|all)\s+(?:mention|occurrence|instance|reference)s?\s+of\s+(.+?)(?:\?|$|\.)|\bwhere\s+(?:all\s+)?(?:is|are)\s+(.+?)\s+(?:mentioned|discussed|covered)(?:\?|$|\.)|\bshow\s+every\s+place\s+where\s+(.+?)\s+(?:appears|is\s+mentioned|is\s+discussed)(?:\?|$|\.)|\bevery\s+mention\s+of\s+(.+?)(?:\?|$|\.)"""
+        """(?i)\b(?:find|show|list|get)\s+(?:every|all)\s+(?:mention|occurrence|instance|reference)s?\s+of\s+(.+?)(?:\?|$|\.)|\bwhere\s+(?:in\s+the\s+(?:document|file|pdf|book)\s+)?(?:all\s+)?(?:is|are)\s+(.+?)\s+(?:mentioned|discussed|covered)(?:\?|$|\.)|\bwhere\s+does\s+(?:the|this)\s+(?:book|document|file|pdf)\s+discuss\s+(.+?)(?:\?|$|\.)|\bshow\s+every\s+place\s+where\s+(.+?)\s+(?:appears|is\s+mentioned|is\s+discussed)(?:\?|$|\.)|\bevery\s+mention\s+of\s+(.+?)(?:\?|$|\.)"""
     )
 
     // 5. EXHAUSTIVE_LIST Patterns (All items belonging to a category)
     private val EXHAUSTIVE_LIST_REGEX = Regex(
-        """(?i)\b(?:list|give\s+me|show|extract|name)\s+(?:all(?:\s+the)?|every|the\s+complete\s+list(?:\s+of)?|the\s+entire\s+list(?:\s+of)?)\s+(.+?)(?:\?|$|\.)|\bwhat\s+are\s+all(?:\s+the)?\s+(.+?)(?:\?|$|\.)|\b(?:complete|entire)\s+list\s+of\s+(.+?)(?:\?|$|\.)|\blist\s+every\s+(.+?)\s+(?:mentioned|in\s+the\s+document)?(?:\?|$|\.)|\b(?:list|extract|name)\s+(?:all\s+)?(?:the\s+)?([a-zA-Z0-9\-_]+s)\b(?:\s+in\s+the\s+document|\?|$|\.)|\bwhat\s+are\s+the\s+([a-zA-Z0-9\-_]+s)\b(?:\s+in\s+the\s+document|\?|$|\.)|\btypes?\s+of\s+(.+?)(?:\?|$|\.)"""
+        """(?i)\b(?:list|give\s+me|show|extract|name)\s+(?:all(?:\s+the)?|every|the\s+complete\s+list(?:\s+of)?|the\s+entire\s+list(?:\s+of)?)\s+(.+?)(?:\?|$|\.)|\bwhat\s+are\s+all(?:\s+the)?\s+(.+?)(?:\?|$|\.)|\b(?:complete|entire)\s+list\s+of\s+(.+?)(?:\?|$|\.)|\blist\s+every\s+(.+?)\s+(?:mentioned|in\s+the\s+document)?(?:\?|$|\.)|\b(?:list|extract|name)\s+(?:all\s+)?(?:the\s+)?([a-zA-Z0-9\-_]+(?:\s+[a-zA-Z0-9\-_]+){0,2}s)\b(?:\s+(?:listed|mentioned|discussed)?\s*(?:in\s+the\s+(?:document|resume|file|pdf|book)|in\s+this\s+(?:document|resume|file|pdf|book))?)?(?:\?|$|\.)|\bwhat\s+are\s+(?:all\s+)?(?:the\s+)?([a-zA-Z0-9\-_]+(?:\s+[a-zA-Z0-9\-_]+){0,2}s)\b(?:\s+(?:listed|mentioned|discussed)?\s*(?:in\s+the\s+(?:document|resume|file|pdf|book)|in\s+this\s+(?:document|resume|file|pdf|book))?)?(?:\?|$|\.)|\btypes?\s+of\s+(.+?)(?:\?|$|\.)|\bwhich\s+([a-zA-Z0-9\-_]+s)\b|\btell\s+me\s+about\s+(?:all\s+)?(?:the\s+)?([a-zA-Z0-9\-_]+s)\b|\bwhat\s+([a-zA-Z0-9\-_]+s)\s+(?:are\s+mentioned|are\s+there|exist|do\s+we\s+have)\b|^([a-zA-Z0-9\-_]+s)$"""
     )
 
     // 6. EXACT_FACT Patterns
@@ -122,7 +122,7 @@ object QueryIntentRouter {
     // 9. ENTITY_LOOKUP Patterns
     // Specifically targets named proper-noun entities (capitalized) or direct person queries ("who is ...")
     private val ENTITY_LOOKUP_REGEX = Regex(
-        """^\s*(?i:what\s+is|tell\s+me\s+about)\s+([A-Z][a-zA-Z0-9\-_]+(?:\s+[A-Z0-9][a-zA-Z0-9\-_]+)*)[\s\?\.\!]*$|^\s*(?i:who\s+is)\s+(.+?)[\s\?\.\!]*$|(?i)\bexplain\s+the\s+([A-Z][a-zA-Z0-9\-_]+(?:\s+[A-Z0-9][a-zA-Z0-9\-_]+)*)\s+(?:mission|project|system|protocol|architecture|algorithm)\b"""
+        """^\s*(?i:what\s+is|tell\s+me\s+about|what\s+does\s+the\s+document\s+say\s+about)\s+([A-Z][a-zA-Z0-9\-_]+(?:\s+[A-Z0-9][a-zA-Z0-9\-_]*)*)[\s\?\.\!]*$|^\s*(?i:who\s+is)\s+(.+?)[\s\?\.\!]*$|(?i)\bexplain\s+the\s+([A-Z][a-zA-Z0-9\-_]+(?:\s+[A-Z0-9][a-zA-Z0-9\-_]*)*)\s+(?:mission|project|system|protocol|architecture|algorithm)\b"""
     )
 
 
@@ -380,7 +380,7 @@ object QueryIntentRouter {
     private fun cleanTargetPhrase(target: String): String {
         var cleaned = target.replace(Regex("""[?.,!;:"]+"""), "").trim()
         cleaned = cleaned.replace(Regex("""^(?:all\s+the|all|every|the|a|an)\s+""", RegexOption.IGNORE_CASE), "").trim()
-        cleaned = cleaned.replace(Regex("""\s+(?:mentioned|in\s+the\s+document|discussed|in\s+this\s+document)$""", RegexOption.IGNORE_CASE), "").trim()
+        cleaned = cleaned.replace(Regex("""\s+(?:listed\s+in\s+the\s+(?:resume|document|guide|file|pdf|book)|in\s+the\s+(?:resume|document|guide|file|pdf|book)|in\s+this\s+(?:resume|document|guide|file|pdf|book)|described\s+in\s+the\s+(?:guide|document|resume)|are\s+mentioned|is\s+mentioned|mentioned|discussed|listed|in\s+the\s+document|in\s+this\s+document)$""", RegexOption.IGNORE_CASE), "").trim()
         cleaned = cleaned.replace(Regex("""\s+section$""", RegexOption.IGNORE_CASE), "").trim()
         return cleaned
     }

@@ -22,6 +22,7 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -158,7 +159,7 @@ class ControlledGraftingSmokeAndroidTest {
         return id
     }
 
-    @Test
+    @Test(timeout = 360_000L)
     fun testControlledGraftingSmokeQueries() = runBlocking {
         println("==================================================")
         println("OFFLINEDOCAI — CONTROLLED END-TO-END SMOKE TEST")
@@ -167,7 +168,10 @@ class ControlledGraftingSmokeAndroidTest {
         // Verify Model Selection
         assertEquals("Production model must be QWEN_1_5B", GGUFLLM.SupportedModel.QWEN_1_5B, llm.getActiveModel())
         val modelFile = llm.resolveModelFile()
-        assertNotNull("Model file must be found", modelFile)
+        assertNotNull(
+            "Model file must be found (ensure qwen2.5-1.5b-instruct-q4_k_m.gguf is in app storage or /data/local/tmp/models/llm/)",
+            modelFile
+        )
         println("Production Model File: ${modelFile!!.name} (${modelFile.length()} bytes)")
         assertTrue("Model must be Qwen 1.5B GGUF", modelFile.name.contains("1.5b", ignoreCase = true))
 
@@ -189,7 +193,7 @@ class ControlledGraftingSmokeAndroidTest {
             val retrieved = vectorStore.retrieveDetailed(
                 queryEmbedding = qEmbedding,
                 relevantDocumentIds = listOf(docId),
-                topK = 2,
+                topK = 20,
                 query = query
             )
             println("Retrieved ${retrieved.size} candidate chunks: ${retrieved.map { "P${it.chunk.pageNumber}(${it.relevanceScore})" }}")
@@ -199,7 +203,7 @@ class ControlledGraftingSmokeAndroidTest {
                 retrievedResults = retrieved,
                 queryIntent = qClassification.intent,
                 queryClassification = qClassification,
-                maxEvidenceTokens = minOf(budget, 120)
+                maxEvidenceTokens = budget
             )
             println("Assembled context: ${assembled.sourceBlocks.size} blocks (${assembled.totalEstimatedTokens} est tokens)")
 
@@ -210,7 +214,9 @@ class ControlledGraftingSmokeAndroidTest {
                 Question: $query
             """.trimIndent()
 
-            val answer = llm.generate(prompt)
+            val answer = withTimeout(90_000L) {
+                llm.generate(prompt)
+            }
             val elapsed = System.currentTimeMillis() - startTime
 
             println("Engine State: ${llm.currentEngineState}")

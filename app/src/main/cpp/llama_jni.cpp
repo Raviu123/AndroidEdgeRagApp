@@ -169,7 +169,7 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     llama_context* ctx = model_ctx->ctx;
 
     llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 1024;
+    ctx_params.n_ctx = 2048;
     ctx_params.n_batch = 512;
     ctx_params.n_ubatch = 256;
     ctx_params.n_threads = model_ctx->thread_count;
@@ -211,22 +211,25 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
         return env->NewStringUTF("Error: Tokenization failed");
     }
 
+    const int max_ctx = llama_n_ctx(ctx);
+    if (n_tokens >= max_ctx) {
+        LOGE("Prompt token count (%d) exceeds context window size (%d)", n_tokens, max_ctx);
+        return env->NewStringUTF("Error: Prompt token count exceeds context window size.");
+    }
+
     // PROMPT_EVAL_START
     auto t_eval_start = std::chrono::steady_clock::now();
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PROMPT_EVAL_START");
 
-    // Prefill decoding batch
-    llama_batch batch = llama_batch_init(n_tokens, 0, 1);
-    for (int i = 0; i < n_tokens; i++) {
-        batch_add(batch, tokens[i], i, { 0 }, i == n_tokens - 1);
-    }
+    const int n_batch = 512;
+    llama_batch batch = llama_batch_init(n_batch, 0, 1);
 
     decode_calls++;
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_DECODE_BEGIN");
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_TOKEN_COUNT=%d", n_tokens);
-    __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_N_BATCH=512");
-    __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_N_UBATCH=512");
-    __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_N_CTX=%d", llama_n_ctx(ctx));
+    __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_N_BATCH=%d", n_batch);
+    __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_N_UBATCH=256");
+    __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_N_CTX=%d", max_ctx);
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_THREADS=%d", model_ctx->thread_count);
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_THREADS_BATCH=%d", model_ctx->thread_count);
 
@@ -235,6 +238,7 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     // Check for cancellation
     if (g_cancel_generation.load()) {
         __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "GENERATION_CANCELLED_BEFORE_START");
+        llama_batch_free(batch);
         return env->NewStringUTF("");
     }
 
@@ -253,7 +257,31 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     });
 
     __android_log_print(ANDROID_LOG_INFO, "CHAT_TRACE", "CHAT_TRACE: BEFORE_PREFILL_DECODE");
-    const int32_t decode_res = llama_decode(ctx, batch);
+    int32_t decode_res = 0;
+    for (int i = 0; i < n_tokens; i += n_batch) {
+        if (g_cancel_generation.load()) {
+            decode_finished.store(true);
+            if (watchdog.joinable()) watchdog.join();
+            llama_batch_free(batch);
+            return env->NewStringUTF("");
+        }
+
+        int n_eval = std::min(n_tokens - i, n_batch);
+        batch.n_tokens = 0;
+        for (int j = 0; j < n_eval; j++) {
+            bool need_logits = (i + j == n_tokens - 1);
+            batch_add(batch, tokens[i + j], i + j, { 0 }, need_logits);
+        }
+
+        decode_res = llama_decode(ctx, batch);
+        if (decode_res != 0) {
+            LOGE("llama_decode failed in prefill with result %d at offset %d", decode_res, i);
+            decode_finished.store(true);
+            if (watchdog.joinable()) watchdog.join();
+            llama_batch_free(batch);
+            return env->NewStringUTF("Error: llama_decode failed during prefill");
+        }
+    }
     decode_finished.store(true);
     __android_log_print(ANDROID_LOG_INFO, "CHAT_TRACE", "CHAT_TRACE: AFTER_PREFILL_DECODE result=%d", decode_res);
 
@@ -262,12 +290,6 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     }
 
     __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "PREFILL_DECODE_RETURN=%d", decode_res);
-
-    if (decode_res != 0) {
-        LOGE("llama_decode failed in prefill with result %d", decode_res);
-        llama_batch_free(batch);
-        return env->NewStringUTF("Error: llama_decode failed during prefill");
-    }
 
     // PROMPT_EVAL_END
     auto t_eval_end = std::chrono::steady_clock::now();
@@ -324,6 +346,11 @@ Java_com_example_offlinedocai_ai_llm_LlamaRunner_nativeInference(JNIEnv* env, jo
     while (tokens_generated < max_tokens) {
         if (g_cancel_generation.load()) {
             __android_log_print(ANDROID_LOG_INFO, "CHAT_PERF", "GENERATION_CANCELLED");
+            break;
+        }
+
+        if (n_tokens + tokens_generated >= max_ctx) {
+            __android_log_print(ANDROID_LOG_WARN, "CHAT_PERF", "CONTEXT_LIMIT_REACHED: pos=%d max_ctx=%d", n_tokens + tokens_generated, max_ctx);
             break;
         }
 

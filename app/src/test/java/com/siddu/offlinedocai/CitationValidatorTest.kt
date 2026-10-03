@@ -460,4 +460,83 @@ class CitationValidatorTest {
         printValidationReport("9. EXHAUSTIVE LIST", result.claimResults.first().originalClaim, "(Page 120)", nasaEvidenceBlocks[8].text, result.claimResults.first().status)
         assertTrue(result.claimResults.all { it.status == ValidationStatus.SUPPORTED })
     }
+
+    // =========================================================================
+    // PART 3: HEADING FILTERING REGRESSION TESTS
+    // =========================================================================
+
+    @Test
+    fun testHeadingDetection_GenericHeadingsRejected() {
+        val headings = listOf(
+            "Page 5: Bark Grafting",
+            "Section 4: Cleft Grafting",
+            "Failure Likely causes / What to check",
+            "Tools & Materials",
+            "Summary / Conclusion",
+            "Page 11: Failure Likely causes / What to check",
+            "Page 12: Troubleshooting & Recovery",
+            "Section 14: Troubleshooting Graft Failure",
+            "Chapter 3: Grafting Methods",
+            "Page 14: Common Causes of Failure.",
+            "Tools and Materials:",
+            "Overview & Fundamentals",
+            "Key details",
+            "What to check"
+        )
+        for (heading in headings) {
+            assertTrue("Heading must be identified and rejected: '$heading'", CitationValidator.isHeadingOrTitle(heading))
+        }
+    }
+
+    @Test
+    fun testHeadingDetection_LegitimateShortFactualSentencesAccepted() {
+        val sentences = listOf(
+            "Grafting joins a scion to a rootstock.",
+            "This method uses diagonal cuts.",
+            "Humidity should remain high.",
+            "If grafting fails, check the alignment of the cambium layers.",
+            "Common causes of failure include poor cuts, incorrect temperatures, and drying out.",
+            "Ensure rubber ties are secure.",
+            "Monitor humidity and wrap grafts with paraffin film.",
+            "Bark grafting is performed when the rootstock is dormant.",
+            "Callus formation occurs most rapidly at temperatures between 21°C and 27°C."
+        )
+        for (sent in sentences) {
+            assertFalse("Legitimate factual sentence must remain eligible: '$sent'", CitationValidator.isHeadingOrTitle(sent))
+        }
+    }
+
+    @Test
+    fun testFallback_CausesQuestionRejectsHeadingPrefersExplanatoryContent() {
+        val blocks = listOf(
+            ParsedSourceBlock(
+                sourceId = 1L,
+                page = 11,
+                pageSpan = "11",
+                section = "Troubleshooting",
+                chunkIndex = 0,
+                text = "Page 11: Failure Likely causes / What to check\nIf grafting fails, check the alignment of the cambium layers. Common causes of failure include poor cuts, incorrect temperatures, and drying out. Ensure rubber ties are secure.",
+                documentId = 10L
+            ),
+            ParsedSourceBlock(
+                sourceId = 2L,
+                page = 12,
+                pageSpan = "12",
+                section = "Recovery",
+                chunkIndex = 1,
+                text = "Page 12: Troubleshooting & Recovery\nMonitor humidity and wrap grafts with paraffin film.",
+                documentId = 10L
+            )
+        )
+
+        // Trigger Level 3 extractive fallback via hallucinated input
+        val hallucinated = "Graft failure is caused by lunar tidal gravitational fluctuations."
+        val result = CitationValidator.validate(hallucinated, blocks, query = "What are the likely causes of graft failure?")
+
+        assertEquals(FallbackLevel.L3_EXTRACTIVE_FALLBACK, result.fallbackLevel)
+        assertFalse("Fallback answer MUST NOT be the section heading", result.validatedAnswer.contains("Failure Likely causes", ignoreCase = true))
+        assertFalse("Fallback answer MUST NOT contain what to check heading", result.validatedAnswer.contains("What to check", ignoreCase = true))
+        assertTrue("Fallback answer must use explanatory content", result.validatedAnswer.contains("Common causes of failure include", ignoreCase = true) || result.validatedAnswer.contains("cambium", ignoreCase = true))
+    }
 }
+

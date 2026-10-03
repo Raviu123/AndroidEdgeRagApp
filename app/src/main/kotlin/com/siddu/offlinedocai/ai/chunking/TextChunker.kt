@@ -383,7 +383,7 @@ object TextChunker {
 
     private fun isListItem(line: String): Boolean {
         val trimmed = line.trim()
-        return Regex("""^(?:[•\-\*\u2022\u2023\u25E6\u2043\u2219]|\d+[\.\)]|[a-zA-Z][\.\)]|\([0-9a-zA-Z]\))\s+""").containsMatchIn(trimmed)
+        return Regex("""^(?:[•\-\*‣◦⁃∙]|\d+[\.\)]|[a-zA-Z][\.\)]|\([0-9a-zA-Z]\))\s+""").containsMatchIn(trimmed)
     }
 
     private fun joinParagraphLines(lines: List<String>): String {
