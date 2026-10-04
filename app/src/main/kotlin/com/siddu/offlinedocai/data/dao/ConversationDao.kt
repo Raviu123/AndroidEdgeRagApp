@@ -20,4 +20,10 @@ interface ConversationDao {
 
     @androidx.room.Delete
     suspend fun delete(conversation: ConversationEntity)
+
+    @Query("UPDATE conversations SET title = :title WHERE id = :id")
+    suspend fun updateTitle(id: Long, title: String)
+
+    @Query("DELETE FROM conversations WHERE id = :id")
+    suspend fun deleteById(id: Long)
 }

@@ -1,6 +1,7 @@
 package com.siddu.offlinedocai.ai.llm
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import com.siddu.offlinedocai.ai.retrieval.ContextAssembler
 import com.siddu.offlinedocai.ai.retrieval.FactType
@@ -335,17 +336,18 @@ class GGUFLLM(private val context: Context) : LocalLLM {
 - Never include irrelevant evidence.
 - Do not create empty list items.
 - Do not output headings as answers.
-- For lists, preserve every requested item with its full grounded description from the source.
-- Format lists with clean numbering (e.g. 1. Item - Description).
-- Include all items mentioned in the evidence; do not skip, truncate, or omit any item.
-- Do not repeat or duplicate items.
-- Cover additional distinct relevant evidence.
+- For step-by-step, troubleshooting, or checklist questions, provide numbered points followed by a brief grounded explanation of what that step means in context.
+- Explain each point using only the retrieved evidence and keep the explanation tied to the document wording.
+- For list questions, preserve every requested item with its grounded description from the source.
+- Format lists with clean numbering (e.g. 1. Item - Explanation grounded in the source evidence).
+- Include all relevant points without skipping or truncating the answer.
+- Cover additional distinct relevant evidence when it helps explain the answer.
 - Stop when the relevant evidence has been adequately covered.
 """.trimIndent()
         }
         val userInstruction = when (answerLength) {
             AnswerLength.SHORT -> "Give the minimum sufficient answer supported by the evidence."
-            AnswerLength.LONG -> "Give the most complete answer that is directly relevant to the question and supported by the evidence."
+            AnswerLength.LONG -> "For step-by-step or checklist questions, provide numbered points with a brief grounded explanation of what each step means in context."
         }
         return buildString {
             append("<|im_start|>system\n")
@@ -357,25 +359,13 @@ class GGUFLLM(private val context: Context) : LocalLLM {
             append("- Do not invent facts, citations, or numbers.\n")
             append("- Preserve exact measurements, dates, URLs, emails, and phone numbers.\n")
             append(lengthInstruction)
-            append("\n<|im_end|>\n")
-            append("<|im_start|>user\n")
-            append("Context:\n")
-            append(contextText.trim())
-            if (calcInstruction.isNotBlank()) {
-                append("\n")
-                append(calcInstruction.trim())
-            }
-            append("\n\nQuestion: ")
-            append(question.trim())
-            append("\n\nInstruction: ")
-            append(userInstruction)
-            append("\n<|im_end|>\n")
-            append("<|im_start|>assistant\n")
+            append("\n<|im_end|>")
+            append("")
         }
     }
 
     fun buildPromptForModel(
-        model: SupportedModel?,
+        model: SupportedModel,
         contextText: String,
         question: String,
         calculationAid: String? = null,
@@ -416,17 +406,18 @@ class GGUFLLM(private val context: Context) : LocalLLM {
 - Never include irrelevant evidence.
 - Do not create empty list items.
 - Do not output headings as answers.
-- For lists, preserve every requested item with its full grounded description from the source.
-- Format lists with clean numbering (e.g. 1. Item - Description).
-- Include all items mentioned in the evidence; do not skip, truncate, or omit any item.
-- Do not repeat or duplicate items.
-- Cover additional distinct relevant evidence.
+- For step-by-step, troubleshooting, or checklist questions, provide numbered points followed by a brief grounded explanation of what that step means in context.
+- Explain each point using only the retrieved evidence and keep the explanation tied to the document wording.
+- For list questions, preserve every requested item with its grounded description from the source.
+- Format lists with clean numbering (e.g. 1. Item - Explanation grounded in the source evidence).
+- Include all relevant points without skipping or truncating the answer.
+- Cover additional distinct relevant evidence when it helps explain the answer.
 - Stop when the relevant evidence has been adequately covered.
 """.trimIndent()
         }
         val userInstruction = when (answerLength) {
             AnswerLength.SHORT -> "Give the minimum sufficient answer supported by the evidence."
-            AnswerLength.LONG -> "Give the most complete answer that is directly relevant to the question and supported by the evidence. For list queries, enumerate all items with their descriptions from the source."
+            AnswerLength.LONG -> "For step-by-step or checklist questions, provide numbered points with a brief grounded explanation of what each step means in context."
         }
         return buildString {
             append("<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n")
@@ -441,7 +432,8 @@ class GGUFLLM(private val context: Context) : LocalLLM {
             append("Context:\n")
             append(contextText.trim())
             if (calcInstruction.isNotBlank()) {
-                append(calcInstruction)
+                append("\n")
+                append(calcInstruction.trim())
             }
             append("\n\nQuestion: ")
             append(question.trim())
@@ -513,6 +505,123 @@ class GGUFLLM(private val context: Context) : LocalLLM {
         return when (answerLength) {
             AnswerLength.SHORT -> 128
             AnswerLength.LONG -> 512
+        }
+    }
+
+    /**
+     * Conversational (no-document) chat entry point.
+     *
+     * This method is intentionally separate from [generate] so that normal chat messages
+     * (where NO document has been selected) NEVER touch the RAG pipeline:
+     * - Does NOT call parsePrompt / parseSourceBlocks
+     * - Does NOT call CitationValidator.validate
+     * - Does NOT reference any "Context:", "uploaded document", or evidence blocks
+     *
+     * It builds a plain chat prompt using the active model's chat template and runs
+     * native inference directly, returning the cleaned raw output.
+     */
+    suspend fun generateConversational(
+        userMessage: String,
+        answerLength: AnswerLength = AnswerLength.SHORT
+    ): String = withContext(Dispatchers.Default) {
+        val requestStartedAt = SystemClock.elapsedRealtime()
+        Log.i(TAG, "generateConversational: msg='$userMessage' length=$answerLength")
+
+        if (!llamaRunner.isNativeLoaded) {
+            throw IllegalStateException("Local LLM model is not installed. Open Settings -> Model Management and import a GGUF model.")
+        }
+
+        val modelResolutionStartedAt = SystemClock.elapsedRealtime()
+        val activeModel = resolveModelFile(activeModelType)
+        Log.i("CHAT_LATENCY", "no_document_model_resolution_ms=${SystemClock.elapsedRealtime() - modelResolutionStartedAt}")
+        if (activeModel == null || !activeModel.exists()) {
+            throw IllegalStateException("Local LLM model is not installed. Open Settings -> Model Management and import a GGUF model.")
+        }
+        if (!activeModel.canRead()) {
+            throw IllegalStateException("Installed model cannot be read. Re-import the model.")
+        }
+
+        // Build a minimal chat prompt — no "Context:" or "Question:" markers so that
+        // this prompt cannot be mis-parsed as a RAG prompt by any downstream code.
+        val arch = activeModelType.architecture
+        val promptBuildStartedAt = SystemClock.elapsedRealtime()
+        val chatPrompt = if (arch.contains("llama", ignoreCase = true)) {
+            buildString {
+                append("<|begin_of_text|>")
+                append("<|start_header_id|>system<|end_header_id|>\n\n")
+                append("You are a helpful, friendly AI assistant. Respond naturally and conversationally.\n")
+                append("<|eot_id|>")
+                append("<|start_header_id|>user<|end_header_id|>\n\n")
+                append(userMessage.trim())
+                append("\n<|eot_id|>")
+                append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+            }
+        } else {
+            // Qwen / default chat template
+            buildString {
+                append("<|im_start|>system\n")
+                append("You are a helpful, friendly AI assistant. Respond naturally and conversationally.\n")
+                append("<|im_end|>")
+                append("")
+            }
+        }
+        Log.i("CHAT_LATENCY", "no_document_prompt_prepare_ms=${SystemClock.elapsedRealtime() - promptBuildStartedAt} prompt_chars=${chatPrompt.length}")
+
+        val maxTokens = resolveMaxGenTokens(answerLength, 0)
+        val modelManager = try { com.siddu.offlinedocai.data.ai.ModelManager.getInstance(context) } catch (_: Exception) { null }
+        modelManager?.setGenerating(true)
+        try {
+            val modelLoadCheckStartedAt = SystemClock.elapsedRealtime()
+            val loaded = llamaRunner.loadModel(
+                modelPath = activeModel.absolutePath,
+                contextSize = SAFE_CONTEXT_SIZE,
+                threadCount = 4
+            )
+            Log.i("CHAT_LATENCY", "no_document_model_load_check_ms=${SystemClock.elapsedRealtime() - modelLoadCheckStartedAt}")
+            if (!loaded) {
+                val err = llamaRunner.getLastErrorMessage()
+                    ?: "Unable to initialize the local LLM. Check the model and device compatibility."
+                throw IllegalStateException(err)
+            }
+            val generationStartedAt = SystemClock.elapsedRealtime()
+            val rawOutput = llamaRunner.inference(
+                prompt = chatPrompt,
+                maxTokens = maxTokens,
+                temperature = DEFAULT_TEMPERATURE
+            )
+            Log.i("CHAT_LATENCY", "no_document_native_call_ms=${SystemClock.elapsedRealtime() - generationStartedAt}")
+            // Strip chat template tokens and clean up
+            val cleanupStartedAt = SystemClock.elapsedRealtime()
+            val cleaned = CitationValidator.cleanAndRenumberList(
+                rawOutput
+                    .replace("<|im_end|>",
+                        "")
+                    .replace("",
+                        "")
+                    .replace("<|endoftext|>",
+                        "")
+                    .replace("<|eot_id|>",
+                        "")
+                    .replace("<|start_header_id|>",
+                        "")
+                    .replace("<|end_header_id|>",
+                        "")
+                    .replace("<|begin_of_text|>",
+                        "")
+                    .replace("<|end_of_text|>",
+                        "")
+                    .trim()
+                    .removePrefix(":")
+                    .trim()
+            )
+            Log.i("CHAT_LATENCY", "no_document_response_cleanup_ms=${SystemClock.elapsedRealtime() - cleanupStartedAt}")
+            if (cleaned.isBlank()) {
+                throw IllegalStateException("Local neural model produced an empty answer.")
+            }
+            Log.i("CHAT_LATENCY", "no_document_generate_total_ms=${SystemClock.elapsedRealtime() - requestStartedAt}")
+            cleaned
+        } finally {
+            modelManager?.setGenerating(false)
         }
     }
 
@@ -628,20 +737,30 @@ class GGUFLLM(private val context: Context) : LocalLLM {
                             )
                             Log.i("RAG_DEBUG", "RAG_DEBUG_08_NATIVE_DONE: rawOutputLen=${neuralOutput.length} rawOutput='$neuralOutput'")
                             val cleanOutput = CitationValidator.cleanAndRenumberList(neuralOutput
-                                .replace("<|im_end|>", "")
-                                .replace("<|im_start|>", "")
-                                .replace("<|endoftext|>", "")
-                                .replace("<|eot_id|>", "")
-                                .replace("<|start_header_id|>", "")
-                                .replace("<|end_header_id|>", "")
-                                .replace("<|begin_of_text|>", "")
-                                .replace("<|end_of_text|>", "")
+                                .replace("<|im_end|>",
+                                    "")
+                                .replace("",
+                                    "")
+                                .replace("<|endoftext|>",
+                                    "")
+                                .replace("<|eot_id|>",
+                                    "")
+                                .replace("<|start_header_id|>",
+                                    "")
+                                .replace("<|end_header_id|>",
+                                    "")
+                                .replace("<|begin_of_text|>",
+                                    "")
+                                .replace("<|end_of_text|>",
+                                    "")
                                 .trim()
                                 .removePrefix(":")
                                 .trim())
 
                             if (cleanOutput.isNotBlank()) {
+                                val validationStartedAt = SystemClock.elapsedRealtime()
                                 val tempValidation = CitationValidator.validate(cleanOutput, blocks, qTrimmed, isBudgetLimited, answerLength, classification)
+                                Log.i("CHAT_LATENCY", "rag_native_output_validation_ms=${SystemClock.elapsedRealtime() - validationStartedAt}")
                                 val claims = CitationValidator.extractClaims(cleanOutput)
                                 val hasDuplicateClaims = claims.size > claims.map { it.lowercase() }.toSet().size
                                 
@@ -779,7 +898,9 @@ class GGUFLLM(private val context: Context) : LocalLLM {
         println("RAW_ANSWER_DEBUG: " + rawAnswer)
 
         // 7. Citation & Claim Validation via Phase 6 CitationValidator
+        val validationStartedAt = SystemClock.elapsedRealtime()
         val validationResult = CitationValidator.validate(rawAnswer, blocks, qTrimmed, isBudgetLimited, answerLength, classification)
+        Log.i("CHAT_LATENCY", "rag_final_citation_validation_ms=${SystemClock.elapsedRealtime() - validationStartedAt}")
         var validated = validationResult.validatedAnswer
         if (validated.isNotBlank() && !validated.contains("Page", ignoreCase = true) &&
             !validated.contains("could not find", ignoreCase = true) && blocks.isNotEmpty()) {
@@ -812,7 +933,7 @@ class GGUFLLM(private val context: Context) : LocalLLM {
                 contextStartIndex = i
             } else if (questionStartIndex == -1 && (trimmed.startsWith("Question:", ignoreCase = true) || trimmed.startsWith("USER QUESTION:", ignoreCase = true))) {
                 questionStartIndex = i
-            } else if (trimmed.startsWith("Answer", ignoreCase = true) || trimmed.startsWith("<|im_end|>") || trimmed.startsWith("<|start_header_id|>assistant")) {
+            } else if (trimmed.startsWith("Answer", ignoreCase = true) || trimmed.startsWith("Instruction:", ignoreCase = true) || trimmed.startsWith("Provide a more detailed", ignoreCase = true) || trimmed.startsWith("Given the context", ignoreCase = true)) {
                 if (answerStartIndex == -1 && (contextStartIndex != -1 || questionStartIndex != -1)) {
                     answerStartIndex = i
                 }
@@ -999,7 +1120,6 @@ class GGUFLLM(private val context: Context) : LocalLLM {
 
         return """
 📄 **Page $targetPage Content:**
-
 $formatted
 
 $citation
@@ -2062,4 +2182,3 @@ $summaryContent
         return formatted.joinToString("\n\n").trim()
     }
 }
-

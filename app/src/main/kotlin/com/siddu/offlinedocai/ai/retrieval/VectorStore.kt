@@ -1,6 +1,7 @@
 package com.siddu.offlinedocai.ai.retrieval
 
 import android.util.Log
+import android.os.SystemClock
 import com.siddu.offlinedocai.data.FloatArrayConverter
 import com.siddu.offlinedocai.data.dao.ChunkDao
 import com.siddu.offlinedocai.data.entities.ChunkEntity
@@ -124,9 +125,15 @@ class VectorStore(private val chunkDao: ChunkDao) {
     ): List<RetrievalResult> {
         if (relevantDocumentIds.isEmpty()) return emptyList()
 
+        val retrievalStartedAt = SystemClock.elapsedRealtime()
         val chunks = chunkDao.getAllChunksForDocumentIds(relevantDocumentIds)
-        if (chunks.isEmpty()) return emptyList()
+        val chunkLoadMs = SystemClock.elapsedRealtime() - retrievalStartedAt
+        if (chunks.isEmpty()) {
+            Log.i("CHAT_LATENCY", "rag_chunk_load_ms=$chunkLoadMs chunks=0 ranking_ms=0")
+            return emptyList()
+        }
 
+        val rankingStartedAt = SystemClock.elapsedRealtime()
         val classification = QueryIntentRouter.route(query)
         logInfo(TAG, "[RETRIEVAL] Query: \"$query\" -> Intent: ${classification.intent}")
 
@@ -143,6 +150,10 @@ class VectorStore(private val chunkDao: ChunkDao) {
             QueryIntent.CONCEPTUAL_QUERY -> retrieveConceptual(chunks, queryEmbedding, query, topK, classification)
         }
 
+        Log.i(
+            "CHAT_LATENCY",
+            "rag_chunk_load_ms=$chunkLoadMs chunks=${chunks.size} ranking_ms=${SystemClock.elapsedRealtime() - rankingStartedAt} result_count=${results.size}"
+        )
         return results
     }
 

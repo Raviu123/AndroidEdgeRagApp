@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -225,6 +226,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 conversationDao.delete(it)
             }
             messageDao.deleteMessagesForConversation(convId)
+        }
+    }
+
+    // Rename a conversation
+    fun renameConversation(convId: Long, newTitle: String) {
+        viewModelScope.launch {
+            conversationDao.updateTitle(convId, newTitle.trim())
+        }
+    }
+
+    // Share conversation as PDF
+    fun shareConversationPdf(context: android.content.Context, convId: Long) {
+        viewModelScope.launch {
+            val conv = conversationDao.getById(convId) ?: return@launch
+            val messages = messageDao.getMessagesForConversation(convId).firstOrNull() ?: emptyList()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                com.siddu.offlinedocai.ui.PdfExporter.exportAndShareConversation(
+                    context = context,
+                    conversationTitle = conv.title,
+                    messages = messages
+                )
+            }
         }
     }
 

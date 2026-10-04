@@ -1,6 +1,7 @@
 package com.siddu.offlinedocai.ai.embeddings
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
@@ -47,6 +48,7 @@ class ONNXEmbeddingEngine(
             return true
         }
 
+        val initializationStartedAt = SystemClock.elapsedRealtime()
         try {
             val modelDir = File(context.filesDir, "models/embedding")
             if (!modelDir.exists()) modelDir.mkdirs()
@@ -85,7 +87,11 @@ class ONNXEmbeddingEngine(
             ortSession = session
             isInitialized = true
 
-            Log.i(TAG, "ONNX embedding engine initialized successfully (Model: ${onnxFile.name}, ${onnxFile.length()} bytes)")
+            Log.i(
+                TAG,
+                "ONNX embedding engine initialized successfully (Model: ${onnxFile.name}, ${onnxFile.length()} bytes)"
+            )
+            Log.i("CHAT_LATENCY", "onnx_cold_initialize_ms=${SystemClock.elapsedRealtime() - initializationStartedAt}")
             return true
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to initialize ONNX embedding session: ${e.message}", e)
@@ -97,6 +103,7 @@ class ONNXEmbeddingEngine(
     fun isLoaded(): Boolean = isInitialized && ortSession != null && tokenizer != null
 
     override suspend fun getEmbedding(text: String): FloatArray = withContext(Dispatchers.Default) {
+        val embeddingStartedAt = SystemClock.elapsedRealtime()
         val cleanText = text.trim()
         if (cleanText.isEmpty()) {
             val emptyVec = FloatArray(EMBEDDING_DIM) { 0.0001f }
@@ -121,6 +128,7 @@ class ONNXEmbeddingEngine(
 
         val tokens = tok.tokenize(cleanText)
         val (inputIds, attentionMask) = tok.padOrTruncate(tokens, MAX_SEQUENCE_LENGTH)
+        val tensorStartedAt = SystemClock.elapsedRealtime()
 
         val shape = longArrayOf(1, MAX_SEQUENCE_LENGTH.toLong())
         val inputs = HashMap<String, OnnxTensor>()
@@ -138,6 +146,8 @@ class ONNXEmbeddingEngine(
                 inputs["token_type_ids"] = typeTensor
             }
 
+            Log.i("CHAT_LATENCY", "onnx_query_tensor_prepare_ms=${SystemClock.elapsedRealtime() - tensorStartedAt}")
+            val inferenceStartedAt = SystemClock.elapsedRealtime()
             session.run(inputs).use { results ->
                 val output = results[0].value
                 val pooledVector = when (output) {
@@ -181,6 +191,10 @@ class ONNXEmbeddingEngine(
                 if (isAllZero(normalized)) {
                     throw IllegalStateException("Embedding inference produced an all-zero vector for text: '$cleanText'")
                 }
+                Log.i(
+                    "CHAT_LATENCY",
+                    "onnx_query_inference_ms=${SystemClock.elapsedRealtime() - inferenceStartedAt} total_embedding_ms=${SystemClock.elapsedRealtime() - embeddingStartedAt}"
+                )
                 normalized
             }
         } catch (e: Throwable) {

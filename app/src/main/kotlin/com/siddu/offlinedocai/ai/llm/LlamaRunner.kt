@@ -1,6 +1,7 @@
 package com.siddu.offlinedocai.ai.llm
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -226,6 +227,7 @@ class LlamaRunner(private val context: Context) {
             return ""
         }
 
+        val inferenceStartedAt = SystemClock.elapsedRealtime()
         _runnerState.value = LlamaState.GENERATING
         return try {
             val result = nativeInference(modelContextPointer, prompt, maxTokens, temperature)
@@ -236,6 +238,10 @@ class LlamaRunner(private val context: Context) {
                 throw IllegalStateException("Local generation failed: $result")
             }
             _runnerState.value = LlamaState.READY
+            Log.i(
+                "CHAT_LATENCY",
+                "gguf_native_inference_ms=${SystemClock.elapsedRealtime() - inferenceStartedAt} prompt_chars=${prompt.length} output_chars=${result.length} max_tokens=$maxTokens"
+            )
             result
         } catch (e: Throwable) {
             Log.e(TAG, "Exception during nativeInference: ${e.message}", e)
