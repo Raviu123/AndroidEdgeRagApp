@@ -55,7 +55,13 @@ import com.siddu.offlinedocai.data.entities.DocumentEntity
 import com.siddu.offlinedocai.data.entities.MessageEntity
 import com.siddu.offlinedocai.data.ai.ModelItem
 import com.siddu.offlinedocai.domain.repository.ChatRepository
+import com.siddu.offlinedocai.ai.embeddings.AvailableEmbeddingModel
+import com.siddu.offlinedocai.ai.embeddings.AvailableEmbeddingModels
+import com.siddu.offlinedocai.ai.llm.AvailableLlmModel
+import com.siddu.offlinedocai.ai.llm.AvailableLlmModels
+import com.siddu.offlinedocai.ai.export.ChatExporter
 import com.siddu.offlinedocai.ui.components.MarkdownMessage
+import com.siddu.offlinedocai.domain.repository.DownloadState
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -941,6 +947,48 @@ fun ChatScreen(
                                     leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp)) }
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("Copy Full Chat (JSON + Chunks)") },
+                                    onClick = {
+                                        chatMenuExpanded = false
+                                        ChatExporter.copyChatToClipboard(
+                                            context = context,
+                                            conversationId = convId,
+                                            conversationTitle = activeConv?.title ?: "Chat",
+                                            documentId = activeConv?.documentId,
+                                            messages = messages,
+                                            includeChunks = true
+                                        )
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Copy Q&A (JSON)") },
+                                    onClick = {
+                                        chatMenuExpanded = false
+                                        ChatExporter.copyChatToClipboard(
+                                            context = context,
+                                            conversationId = convId,
+                                            conversationTitle = activeConv?.title ?: "Chat",
+                                            documentId = activeConv?.documentId,
+                                            messages = messages,
+                                            includeChunks = false
+                                        )
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.CopyAll, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Copy Q&A (Plain Text)") },
+                                    onClick = {
+                                        chatMenuExpanded = false
+                                        ChatExporter.copyPlainTextQnAToClipboard(
+                                            context = context,
+                                            conversationTitle = activeConv?.title ?: "Chat",
+                                            messages = messages
+                                        )
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Share as PDF") },
                                     onClick = {
                                         chatMenuExpanded = false
@@ -1740,6 +1788,16 @@ fun SettingsScreen(
     val activeModel by viewModel.activeLlmModelItem.collectAsState()
     val isEmbedReady by viewModel.isEmbeddingModelDownloaded.collectAsState()
 
+    val downloadedLlmModels by viewModel.downloadedLlmModels.collectAsState()
+    val selectedLlmModel by viewModel.selectedLlmModel.collectAsState()
+    val currentlyDownloadingLlm by viewModel.currentlyDownloadingModel.collectAsState()
+    val llmDownloadState by viewModel.llmDownloadState.collectAsState()
+
+    val downloadedEmbeddingModels by viewModel.downloadedEmbeddingModels.collectAsState()
+    val selectedEmbeddingModel by viewModel.selectedEmbeddingModel.collectAsState()
+    val currentlyDownloadingEmbed by viewModel.currentlyDownloadingEmbeddingModel.collectAsState()
+    val embeddingDownloadState by viewModel.embeddingDownloadState.collectAsState()
+
     var modelToDelete by remember { mutableStateOf<ModelItem?>(null) }
 
     val importModelLauncher = rememberLauncherForActivityResult(
@@ -1856,7 +1914,7 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = activeModel?.displayName ?: "Qwen 2.5 1.5B Instruct",
+                                    text = activeModel?.displayName ?: selectedLlmModel?.name ?: "Qwen 2.5 1.5B Instruct",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                 )
                                 val sizeMb = (activeModel?.sizeBytes ?: 1117320736L) / (1024 * 1024)
@@ -1944,27 +2002,65 @@ fun SettingsScreen(
                 }
             }
 
-            // Embedding Engine Card
+            // SLM / LLM Models Catalog
             item {
                 Text(
-                    text = "Embedding Engine",
+                    text = "SLM Model Catalog (One-Click Downloads)",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "all-MiniLM-L6-v2",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AvailableLlmModels.list.forEach { model ->
+                        val isDownloaded = downloadedLlmModels.any { it.name == model.fileName }
+                        val isSelected = selectedLlmModel?.name == model.fileName
+                        val isDownloading = currentlyDownloadingLlm == model.fileName && llmDownloadState is DownloadState.Progress
+                        val progress = if (isDownloading) llmDownloadState as DownloadState.Progress else null
+
+                        ModelOptionCard(
+                            model = model,
+                            isDownloaded = isDownloaded,
+                            isSelected = isSelected,
+                            isDownloading = isDownloading,
+                            downloadProgress = progress,
+                            onDownload = {
+                                viewModel.downloadLlmModel(model.downloadUrl, model.fileName)
+                            },
+                            onSelect = {
+                                val file = downloadedLlmModels.firstOrNull { it.name == model.fileName }
+                                if (file != null) viewModel.selectLlmModel(file)
+                            }
                         )
-                        Text(
-                            text = "ONNX Runtime • 384-dimensional dense vectors",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                }
+            }
+
+            // Embedding Models Catalog
+            item {
+                Text(
+                    text = "Embedding Model Catalog",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AvailableEmbeddingModels.list.forEach { model ->
+                        val isDownloaded = downloadedEmbeddingModels.any { it.name == model.fileName }
+                        val isSelected = selectedEmbeddingModel?.name == model.fileName
+                        val isDownloading = currentlyDownloadingEmbed == model.fileName && embeddingDownloadState is DownloadState.Progress
+                        val progress = if (isDownloading) embeddingDownloadState as DownloadState.Progress else null
+
+                        EmbeddingModelOptionCard(
+                            model = model,
+                            isDownloaded = isDownloaded,
+                            isSelected = isSelected,
+                            isDownloading = isDownloading,
+                            downloadProgress = progress,
+                            onDownload = {
+                                viewModel.downloadEmbeddingModel(model.downloadUrl, model.fileName)
+                            },
+                            onSelect = {
+                                val file = downloadedEmbeddingModels.firstOrNull { it.name == model.fileName }
+                                if (file != null) viewModel.selectEmbeddingModel(file)
+                            }
                         )
                     }
                 }
@@ -2003,6 +2099,184 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ModelOptionCard(
+    model: AvailableLlmModel,
+    isDownloaded: Boolean,
+    isSelected: Boolean,
+    isDownloading: Boolean,
+    downloadProgress: DownloadState.Progress?,
+    onDownload: () -> Unit,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                isSelected -> MaterialTheme.colorScheme.primaryContainer
+                isDownloaded -> MaterialTheme.colorScheme.surfaceVariant
+                else -> MaterialTheme.colorScheme.surface
+            }
+        ),
+        shape = RoundedCornerShape(12.dp),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, ChatGPTGreen) else null,
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (isDownloaded) Modifier.clickable { onSelect() } else Modifier)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = model.name,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${model.parameterSize} params • Size: ${model.downloadSize}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (isDownloading && downloadProgress != null) {
+                    Text(
+                        "${downloadProgress.percent}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ChatGPTGreen
+                    )
+                } else if (isDownloaded) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) ChatGPTGreen else MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Text(
+                            text = if (isSelected) "Active" else "Select",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = onDownload,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Download", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+
+            if (isDownloading && downloadProgress != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { downloadProgress.percent / 100f },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = ChatGPTGreen
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun EmbeddingModelOptionCard(
+    model: AvailableEmbeddingModel,
+    isDownloaded: Boolean,
+    isSelected: Boolean,
+    isDownloading: Boolean,
+    downloadProgress: DownloadState.Progress?,
+    onDownload: () -> Unit,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                isSelected -> MaterialTheme.colorScheme.primaryContainer
+                isDownloaded -> MaterialTheme.colorScheme.surfaceVariant
+                else -> MaterialTheme.colorScheme.surface
+            }
+        ),
+        shape = RoundedCornerShape(12.dp),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, ChatGPTGreen) else null,
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (isDownloaded) Modifier.clickable { onSelect() } else Modifier)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = model.name,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${model.format} • ${model.dimension}-dim • Size: ${model.downloadSize}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (isDownloading && downloadProgress != null) {
+                    Text(
+                        "${downloadProgress.percent}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ChatGPTGreen
+                    )
+                } else if (isDownloaded) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) ChatGPTGreen else MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Text(
+                            text = if (isSelected) "Active" else "Select",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = onDownload,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Download", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+
+            if (isDownloading && downloadProgress != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { downloadProgress.percent / 100f },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = ChatGPTGreen
+                )
             }
         }
     }

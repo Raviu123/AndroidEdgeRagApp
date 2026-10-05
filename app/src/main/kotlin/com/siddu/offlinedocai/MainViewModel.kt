@@ -48,6 +48,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isEmbeddingModelDownloaded = MutableStateFlow(false)
     val isLlmModelDownloaded = MutableStateFlow(false)
 
+    val downloadedEmbeddingModels = MutableStateFlow<List<File>>(emptyList())
+    val selectedEmbeddingModel = MutableStateFlow<File?>(null)
+    val currentlyDownloadingEmbeddingModel = MutableStateFlow<String?>(null)
+    val currentlyDownloadingModel = MutableStateFlow<String?>(null)
+
     private val embeddingDownloader = ModelDownloader(application)
     val embeddingDownloadState: StateFlow<DownloadState> = embeddingDownloader.downloadState
 
@@ -62,6 +67,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val downloadedLlmModels = MutableStateFlow<List<File>>(emptyList())
     val selectedLlmModel = MutableStateFlow<File?>(null)
+
+    // Question Queue Manager for batch/sequential question execution
+    val questionQueueManager = com.siddu.offlinedocai.ai.queue.QuestionQueueManager(viewModelScope)
+    val questionQueueState: StateFlow<com.siddu.offlinedocai.ai.queue.QuestionQueueState> = questionQueueManager.queueState
 
     // Repositories
     private val documentRepository = DocumentRepository(application, database)
@@ -167,20 +176,84 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         checkModels()
     }
 
-    fun downloadLlmModel(urlStr: String, fileName: String) {
-        val destFile = File(getApplication<Application>().filesDir, "models/llm/$fileName")
+    fun selectEmbeddingModel(file: File) {
+        selectedEmbeddingModel.value = file
+        val prefs = getApplication<Application>().getSharedPreferences("docai_models", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("selected_embedding_model", file.name).apply()
+    }
+
+    fun deleteEmbeddingModel(file: File) {
         viewModelScope.launch {
-            llmDownloader.downloadModel(urlStr, destFile)
+            if (file.exists()) {
+                file.delete()
+            }
+            val prefs = getApplication<Application>().getSharedPreferences("docai_models", android.content.Context.MODE_PRIVATE)
+            if (prefs.getString("selected_embedding_model", null) == file.name) {
+                prefs.edit().remove("selected_embedding_model").apply()
+            }
             checkModels()
         }
     }
 
+    fun downloadEmbeddingModel(urlStr: String, fileName: String) {
+        currentlyDownloadingEmbeddingModel.value = fileName
+        val destFile = File(getApplication<Application>().filesDir, "models/embeddings/$fileName")
+        viewModelScope.launch {
+            embeddingDownloader.downloadModel(urlStr, destFile)
+            checkModels()
+            if (selectedEmbeddingModel.value == null && destFile.exists()) {
+                selectEmbeddingModel(destFile)
+            }
+        }
+    }
+
+    fun downloadLlmModel(urlStr: String, fileName: String) {
+        currentlyDownloadingModel.value = fileName
+        val destFile = File(getApplication<Application>().filesDir, "models/llm/$fileName")
+        viewModelScope.launch {
+            llmDownloader.downloadModel(urlStr, destFile)
+            checkModels()
+            if (selectedLlmModel.value == null && destFile.exists()) {
+                selectLlmModel(destFile)
+            }
+        }
+    }
+
     fun resetLlmDownloadState() {
+        currentlyDownloadingModel.value = null
         llmDownloader.resetState()
     }
 
     fun resetEmbeddingDownloadState() {
+        currentlyDownloadingEmbeddingModel.value = null
         embeddingDownloader.resetState()
+    }
+
+    /** Start sequential processing of multiple questions */
+    fun startQuestionQueue(convId: Long, questions: List<String>, docIds: List<Long>) {
+        questionQueueManager.startQueue(convId, questions, docIds) { targetConvId, questionText, targetDocIds ->
+            chatRepository.sendMessage(targetConvId, questionText, targetDocIds, _selectedAnswerLength.value)
+        }
+    }
+
+    fun pauseQuestionQueue() {
+        questionQueueManager.pauseQueue()
+    }
+
+    fun resumeQuestionQueue() {
+        questionQueueManager.resumeQueue()
+    }
+
+    fun stopQuestionQueue() {
+        questionQueueManager.stopQueue()
+    }
+
+    fun clearQuestionQueue() {
+        questionQueueManager.clearQueue()
+    }
+
+    fun parseQuestions(rawInput: String): List<String> {
+        return com.siddu.offlinedocai.ai.queue.QuestionQueueParser.parseQuestions(rawInput)
     }
 
     /** Trigger document import */

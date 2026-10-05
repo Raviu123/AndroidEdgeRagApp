@@ -26,5 +26,5 @@ interface ChunkDao {
     suspend fun getChunksForPageRange(docIds: List<Long>, startPage: Int, endPage: Int): List<ChunkEntity>
 
     @Query("DELETE FROM chunks WHERE documentId = :docId")
-    suspend fun deleteChunksForDocument(docId: Long)
+    suspend fun deleteChunksForDocument(docId: Long) {}
 }

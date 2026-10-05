@@ -17,6 +17,9 @@ import com.siddu.offlinedocai.ai.retrieval.QueryIntentRouter
 import com.siddu.offlinedocai.ai.retrieval.RetrievalResult
 import com.siddu.offlinedocai.ai.retrieval.SourceBlock
 import com.siddu.offlinedocai.ai.retrieval.VectorStore
+import com.siddu.offlinedocai.ai.compression.SelectiveContentReducer
+import com.siddu.offlinedocai.ai.governor.MemoryGovernor
+import com.siddu.offlinedocai.ai.reformulation.QueryReformulator
 import com.siddu.offlinedocai.data.AppDatabase
 import com.siddu.offlinedocai.data.dao.MessageDao
 import com.siddu.offlinedocai.data.entities.MessageEntity
@@ -210,6 +213,10 @@ How may I help you today?
                     val queryEmbedding = embeddingEngine.getEmbedding(userText)
                     Log.i("CHAT_LATENCY", "rag_query_embedding_ms=${SystemClock.elapsedRealtime() - embeddingStartedAt}")
                     Log.i("RAG_DEBUG", "RAG_DEBUG_03_EMBEDDING_DONE: size=${queryEmbedding.size}")
+                    // Real-time dynamic RAM budget check
+                    val memoryConfig = MemoryGovernor.getAdaptiveConfig()
+                    Log.i("RAG_DEBUG", "MemoryGovernor: level=${memoryConfig.pressureLevel} pressure=${memoryConfig.pressureRatio} maxTokens=${memoryConfig.maxContextTokens}")
+
                     val queryClassification = QueryIntentRouter.route(userText)
 
                     val retrievalStartedAt = SystemClock.elapsedRealtime()
@@ -222,7 +229,11 @@ How may I help you today?
                     Log.i("CHAT_LATENCY", "rag_retrieval_total_ms=${SystemClock.elapsedRealtime() - retrievalStartedAt} results=${retrieved.size}")
                     Log.i("RAG_DEBUG", "RAG_DEBUG_04_RETRIEVAL_DONE: count=${retrieved.size} pages=${retrieved.map { it.chunk.pageNumber }.distinct()}")
 
-                    val evidenceBudget = ContextAssembler.resolveEvidenceBudget(queryClassification.intent)
+                    val rawEvidenceBudget = ContextAssembler.resolveEvidenceBudget(queryClassification.intent)
+                    val evidenceBudget = if (memoryConfig.pressureLevel == MemoryGovernor.PressureLevel.CRITICAL) {
+                        kotlin.math.min(rawEvidenceBudget, memoryConfig.maxContextTokens)
+                    } else rawEvidenceBudget
+
                     val contextStartedAt = SystemClock.elapsedRealtime()
                     val assembled = ContextAssembler.assemble(
                         retrievedResults = retrieved,

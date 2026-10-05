@@ -15,5 +15,10 @@ interface LocalLLM {
      * Defaults to calling [generate(prompt)].
      */
     suspend fun generate(prompt: String, answerLength: AnswerLength): String = generate(prompt)
+
+    /**
+     * Generate a response with an explicit [systemPrompt] behavioral instruction.
+     */
+    suspend fun generate(prompt: String, systemPrompt: String?): String = generate(prompt)
 }
 

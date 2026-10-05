@@ -440,8 +440,45 @@ object TextChunker {
         return !endsWithTerminal && nTrim[0].isLowerCase()
     }
 
-    private fun splitIntoSentences(text: String): List<String> {
-        return text.split(Regex("""(?<=[.!?])\s+""")).map { it.trim() }.filter { it.isNotEmpty() }
+    fun splitIntoSentences(text: String): List<String> {
+        val clean = text.trim()
+        if (clean.isEmpty()) return emptyList()
+
+        val iterator = java.text.BreakIterator.getSentenceInstance(java.util.Locale.US)
+        iterator.setText(clean)
+
+        val rawSentences = mutableListOf<String>()
+        var start = iterator.first()
+        var end = iterator.next()
+
+        while (end != java.text.BreakIterator.DONE) {
+            val sentence = clean.substring(start, end).trim()
+            if (sentence.isNotEmpty()) {
+                rawSentences.add(sentence)
+            }
+            start = end
+            end = iterator.next()
+        }
+
+        val abbreviations = setOf("dr.", "mr.", "mrs.", "ms.", "prof.", "sr.", "jr.", "e.g.", "i.e.", "vs.", "etc.")
+        val merged = mutableListOf<String>()
+        var i = 0
+        while (i < rawSentences.size) {
+            var current = rawSentences[i]
+            while (i + 1 < rawSentences.size) {
+                val lastToken = current.split(Regex("\\s+")).lastOrNull()?.lowercase()?.trimEnd('.', ',') + "."
+                if (abbreviations.contains(lastToken)) {
+                    i++
+                    current = "$current ${rawSentences[i]}"
+                } else {
+                    break
+                }
+            }
+            merged.add(current)
+            i++
+        }
+
+        return if (merged.isNotEmpty()) merged else listOf(clean)
     }
 
     private fun countWords(text: String): Int {
