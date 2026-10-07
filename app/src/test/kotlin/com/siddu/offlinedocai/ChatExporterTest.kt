@@ -20,16 +20,16 @@ class ChatExporterTest {
             id = 2L,
             conversationId = 100L,
             role = "user",
-            content = "What is grafting?",
+            content = "What is the refund policy?",
             timestamp = 2000L
         ),
         MessageEntity(
             id = 3L,
             conversationId = 100L,
             role = "assistant",
-            content = "Grafting is a horticultural technique joining plant tissues.",
+            content = "Unused items can be returned within 30 days for a full refund.",
             timestamp = 3000L,
-            sources = "Page 1 [SCR -30%]: Grafting is a horticultural technique...|||Page 2: Scion and rootstock details"
+            sources = "Page 1: Unused items can be returned within 30 days...|||Page 2: Refunds go to the original payment method"
         )
     )
 
@@ -51,7 +51,7 @@ class ChatExporterTest {
         assertEquals(2, qaTurns.length())
 
         val turn2 = qaTurns.getJSONObject(1)
-        assertEquals("What is grafting?", turn2.getString("question"))
+        assertEquals("What is the refund policy?", turn2.getString("question"))
         assertTrue("Should have retrieved chunks", turn2.has("retrievedChunks"))
         assertEquals(2, turn2.getJSONArray("retrievedChunks").length())
     }
@@ -73,8 +73,8 @@ class ChatExporterTest {
         assertEquals(2, qaTurns.length())
 
         val turn2 = qaTurns.getJSONObject(1)
-        assertEquals("What is grafting?", turn2.getString("question"))
-        assertEquals("Grafting is a horticultural technique joining plant tissues.", turn2.getString("response"))
+        assertEquals("What is the refund policy?", turn2.getString("question"))
+        assertEquals("Unused items can be returned within 30 days for a full refund.", turn2.getString("response"))
         assertFalse("Should NOT have retrievedChunks in Q&A only mode", turn2.has("retrievedChunks"))
 
         val rawMessages = obj.getJSONArray("rawMessages")
@@ -87,14 +87,14 @@ class ChatExporterTest {
     @Test
     fun testBuildPlainTextQnA() {
         val text = ChatExporter.buildPlainTextQnA(
-            conversationTitle = "Grafting Guide",
+            conversationTitle = "Store Policies",
             messages = sampleMessages
         )
 
-        assertTrue(text.contains("# 💬 Grafting Guide"))
-        assertTrue(text.contains("### Q1: What is grafting?"))
+        assertTrue(text.contains("# 💬 Store Policies"))
+        assertTrue(text.contains("### Q1: What is the refund policy?"))
         assertTrue(text.contains("**Answer:**"))
-        assertTrue(text.contains("Grafting is a horticultural technique joining plant tissues."))
+        assertTrue(text.contains("Unused items can be returned within 30 days for a full refund."))
         assertFalse("Plain text should not contain raw chunks markup", text.contains("Page 1 [SCR"))
     }
 }

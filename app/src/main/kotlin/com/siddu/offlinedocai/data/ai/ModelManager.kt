@@ -61,7 +61,7 @@ data class ImportProgress(
  * - Safe model deletion (preventing deletion during active generation)
  * - Active model selection and graceful fallback
  */
-class ModelManager(private val context: Context) {
+class ModelManager(private val context: Context, refreshOnInit: Boolean = true) {
 
     private val TAG = "ModelManager"
     private val prefs: SharedPreferences = context.getSharedPreferences("offline_doc_ai_models", Context.MODE_PRIVATE)
@@ -90,14 +90,18 @@ class ModelManager(private val context: Context) {
 
         fun getInstance(context: Context): ModelManager {
             return instance ?: synchronized(this) {
-                instance ?: ModelManager(context.applicationContext).also { instance = it }
+                instance ?: ModelManager(context.applicationContext, refreshOnInit = false).also { instance = it }
             }
         }
     }
 
     init {
-        refreshModels()
+        // The app-wide instance refreshes on a background thread instead (see refresh()).
+        if (refreshOnInit) refreshModels()
     }
+
+    /** Re-scans installed models off the main thread (GGUF headers are read from disk). */
+    suspend fun refresh() = withContext(Dispatchers.IO) { refreshModels() }
 
     fun getModelDirectory(): File {
         val dir = File(context.filesDir, "models/llm")
@@ -128,9 +132,9 @@ class ModelManager(private val context: Context) {
         } ?: emptyList()
         foundFiles.addAll(localFiles)
 
-        // 2. Files in /data/local/tmp/models/llm (for development / adb push convenience)
+        // 2. Debug builds only: /data/local/tmp/models/llm (adb push convenience)
         val tmpDir = File("/data/local/tmp/models/llm")
-        if (tmpDir.exists() && tmpDir.isDirectory) {
+        if (com.siddu.offlinedocai.BuildConfig.DEBUG && tmpDir.exists() && tmpDir.isDirectory) {
             val tmpFiles = tmpDir.listFiles()?.filter {
                 it.isFile && it.extension.equals("gguf", ignoreCase = true) && it.length() > 1024
             } ?: emptyList()
@@ -273,7 +277,7 @@ class ModelManager(private val context: Context) {
      * Copies safely into a .part temporary file, validates GGUF header/metadata,
      * atomically renames to the destination file, registers the model, and activates it.
      */
-    suspend fun importModelFromUri(uri: Uri): Result<ModelItem> = withContext(Dispatchers.IO) {
+    suspend fun importModelFromUri(uri: Uri, beforeReplace: suspend (File) -> Unit = {}): Result<ModelItem> = withContext(Dispatchers.IO) {
         _importError.value = null
         try {
             val resolver = context.contentResolver
@@ -352,8 +356,9 @@ class ModelManager(private val context: Context) {
                 return@withContext Result.failure(IllegalArgumentException(userError))
             }
 
-            // 4. Atomically move/rename temp file to destination file
+            // 4. Atomically move/rename temp file to destination file (releasing it first if it is the loaded model)
             if (destFile.exists()) {
+                beforeReplace(destFile)
                 destFile.delete()
             }
             val renamed = tempFile.renameTo(destFile)
@@ -442,7 +447,8 @@ class ModelManager(private val context: Context) {
                         quantization = obj.optString("quantization", ""),
                         contextLength = obj.optInt("contextLength", 2048),
                         sizeBytes = obj.optLong("sizeBytes", 0L),
-                        isValid = obj.optBoolean("isValid", true)
+                        isValid = obj.optBoolean("isValid", true),
+                        errorMessage = if (obj.has("errorMessage") && !obj.isNull("errorMessage")) obj.getString("errorMessage").takeIf { it.isNotBlank() } else null
                     )
                 }
             }
@@ -465,6 +471,10 @@ class ModelManager(private val context: Context) {
                 obj.put("contextLength", item.contextLength)
                 obj.put("sizeBytes", item.sizeBytes)
                 obj.put("isValid", item.status != ModelStatus.ERROR)
+                // Bug #8 fix: persist errorMessage so it survives across app restarts
+                if (!item.errorMessage.isNullOrBlank()) {
+                    obj.put("errorMessage", item.errorMessage)
+                }
                 jsonArray.put(obj)
             }
             metadataFile.writeText(jsonArray.toString(2), Charsets.UTF_8)

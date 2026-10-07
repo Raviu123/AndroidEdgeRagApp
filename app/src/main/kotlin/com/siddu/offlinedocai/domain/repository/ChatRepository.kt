@@ -3,458 +3,353 @@ package com.siddu.offlinedocai.domain.repository
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import com.siddu.offlinedocai.ai.embeddings.AvailableEmbeddingModels
+import com.siddu.offlinedocai.ai.embeddings.EmbeddingManager
 import com.siddu.offlinedocai.ai.embeddings.EmbeddingModel
-import com.siddu.offlinedocai.ai.embeddings.ONNXEmbeddingEngine
-import com.siddu.offlinedocai.ai.llm.LocalLLM
-import com.siddu.offlinedocai.ai.llm.OllamaLLM
-import com.siddu.offlinedocai.ai.llm.GGUFLLM
 import com.siddu.offlinedocai.ai.llm.AnswerLength
-import com.siddu.offlinedocai.ai.retrieval.AssembledContext
+import com.siddu.offlinedocai.ai.llm.ChatTurn
+import com.siddu.offlinedocai.ai.llm.GGUFLLM
+import com.siddu.offlinedocai.ai.llm.GenerationCancelledException
+import com.siddu.offlinedocai.ai.llm.GenerationRequest
+import com.siddu.offlinedocai.ai.llm.GenerationToken
+import com.siddu.offlinedocai.ai.llm.LocalLLM
+import com.siddu.offlinedocai.ai.llm.PromptBuilder
 import com.siddu.offlinedocai.ai.retrieval.ContextAssembler
 import com.siddu.offlinedocai.ai.retrieval.QueryClassification
 import com.siddu.offlinedocai.ai.retrieval.QueryIntent
 import com.siddu.offlinedocai.ai.retrieval.QueryIntentRouter
 import com.siddu.offlinedocai.ai.retrieval.RetrievalResult
-import com.siddu.offlinedocai.ai.retrieval.SourceBlock
+import com.siddu.offlinedocai.ai.retrieval.RetrievalSource
+import com.siddu.offlinedocai.ai.retrieval.SearchQuery
+import com.siddu.offlinedocai.ai.retrieval.TextAnalyzer
 import com.siddu.offlinedocai.ai.retrieval.VectorStore
-import com.siddu.offlinedocai.ai.compression.SelectiveContentReducer
-import com.siddu.offlinedocai.ai.governor.MemoryGovernor
-import com.siddu.offlinedocai.ai.reformulation.QueryReformulator
 import com.siddu.offlinedocai.data.AppDatabase
-import com.siddu.offlinedocai.data.dao.MessageDao
-import com.siddu.offlinedocai.data.entities.MessageEntity
 import com.siddu.offlinedocai.data.entities.ConversationEntity
+import com.siddu.offlinedocai.data.entities.MessageEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.util.UUID
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Repository that implements the RAG chat pipeline.
+ * RAG chat pipeline:
+ *   classify the question once -> embed the question (+ comparison sides / follow-up context)
+ *   -> hybrid retrieval over chunks of the active embedding model -> relevance gate
+ *   -> budgeted context assembly -> grounded, streamed generation.
+ *
+ * Requests run one at a time. Each has its own cancellation token, so stopping or timing out one
+ * request can never stop another, and the timeout only counts time spent generating.
  */
 class ChatRepository(
     private val context: Context,
     private val db: AppDatabase,
     private val vectorStore: VectorStore,
-    private val useOllama: Boolean = false // dev flag – set false for final offline mode
+    private val scope: CoroutineScope,
+    internal val llm: LocalLLM = GGUFLLM.getInstance(context),
+    private val embedder: EmbeddingModel = EmbeddingManager.getInstance(context)
 ) {
     private val TAG = "ChatRepository"
 
-    private val messageDao: MessageDao = db.messageDao()
+    companion object {
+        /** Assistant messages that report a failure start with this marker (never used as conversation context). */
+        const val ERROR_PREFIX = "⚠️ "
+
+        /**
+         * Upper bounds on evidence tokens. The real limit is what fits in the model's context window;
+         * these caps keep prompt-processing time reasonable on phone CPUs (prefill is roughly linear in
+         * prompt length) and stop small models from being diluted by marginal passages.
+         */
+        fun evidenceCap(intent: QueryIntent): Int = when (intent) {
+            QueryIntent.GENERAL -> 1500
+            QueryIntent.COMPARISON -> 2000
+            QueryIntent.ENUMERATION, QueryIntent.SUMMARY, QueryIntent.PAGE_LOOKUP, QueryIntent.PAGE_RANGE -> 2400
+        }
+
+        private val FOLLOW_UP_START = Regex("""(?i)^\s*(and|but|also|then|so|what about|how about|why|explain (that|this|more|further)|tell me more|more on|elaborate|continue|ok(ay)?,?)\b""")
+        private val FOLLOW_UP_PRONOUN = Regex("""(?i)\b(it|its|they|them|their|this|that|these|those|he|she|his|her|there|the (first|second|third|last|former|latter|above|same) (one|ones|point|item|step)?)\b""")
+
+        /** Short or pronoun-led questions usually depend on the previous question for their subject. */
+        fun isFollowUp(question: String): Boolean {
+            val words = question.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            if (words.isEmpty()) return false
+            return FOLLOW_UP_START.containsMatchIn(question) || (words.size <= 8 && FOLLOW_UP_PRONOUN.containsMatchIn(question))
+        }
+    }
+
+    private val messageDao = db.messageDao()
     private val conversationDao = db.conversationDao()
-    private val embeddingEngine: EmbeddingModel = ONNXEmbeddingEngine(context)
-    internal val llm: LocalLLM = if (useOllama) OllamaLLM() else GGUFLLM(context)
+    private val documentDao = db.documentDao()
 
     private val _chatState = MutableStateFlow<ChatState>(ChatState.Idle)
     val chatState: StateFlow<ChatState> = _chatState
 
-    /** Safely switch the underlying GGUF LLM model (e.g. Qwen 0.5B vs Llama 3.2 1B) */
-    fun selectLlmModel(model: GGUFLLM.SupportedModel): Boolean {
-        return if (llm is GGUFLLM) {
-            llm.selectModel(model)
-        } else false
-    }
+    /** One request at a time: the model can only run one generation, and the UI shows one progress state. */
+    private val requestMutex = Mutex()
+    @Volatile private var currentToken: GenerationToken? = null
 
-    fun selectLlmModel(file: java.io.File): Boolean {
-        return if (llm is GGUFLLM) {
-            llm.selectModel(file)
-        } else false
-    }
-
-    fun getActiveLlmModel(): GGUFLLM.SupportedModel? {
-        return (llm as? GGUFLLM)?.getActiveModel()
-    }
-
-    /** Create a new conversation, auto-generate welcome message, and return its ID */
-    suspend fun startConversation(title: String = "Chat ${System.currentTimeMillis()}", documentId: Long? = null): Long = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        val conversation = ConversationEntity(
-            id = 0,
-            title = title,
-            createdAt = System.currentTimeMillis(),
-            documentId = documentId
-        )
-        val convId = conversationDao.insert(conversation)
-
-        // Insert initial greeting message
-        if (documentId != null && documentId > 0) {
-            val doc = db.documentDao().getById(documentId)
-            val docName = doc?.name ?: "Selected Document"
-            val pageCount = doc?.pageCount ?: 0
-            
-            val welcomeText = """
-👋 Welcome to your document assistant! 
-
-I have parsed **$docName** ($pageCount pages), computed semantic embeddings, and successfully indexed the text chunks into local memory database.
-
-### Document Summary:
-This document is ready for local Retrieval-Augmented Generation (RAG) queries. You can ask me to search, summarize, or retrieve specific key details from it.
-
-How may I help you with it?
-""".trimIndent()
-            
-            messageDao.insert(
-                MessageEntity(
-                    id = 0,
-                    conversationId = convId,
-                    role = "assistant",
-                    content = welcomeText,
-                    timestamp = System.currentTimeMillis()
-                )
-            )
-        } else {
-            val welcomeText = """
-👋 Hello! I am your local offline AI assistant. 
-
-How may I help you today?
-
-*Note: This is a general LLM chat session. To query a specific document using RAG, start a new conversation and check the document checkbox to load it as reference.*
-""".trimIndent()
-            
-            messageDao.insert(
-                MessageEntity(
-                    id = 0,
-                    conversationId = convId,
-                    role = "assistant",
-                    content = welcomeText,
-                    timestamp = System.currentTimeMillis()
-                )
-            )
+    suspend fun startConversation(title: String = "Chat ${System.currentTimeMillis()}", documentId: Long? = null): Long =
+        withContext(Dispatchers.IO) {
+            val convId = conversationDao.insert(ConversationEntity(title = title, documentId = documentId))
+            val welcome = if (documentId != null && documentId > 0) {
+                val doc = documentDao.getById(documentId)
+                "Ask me anything about **${doc?.name ?: "the selected document"}**. Answers are generated only from the document and cite the pages they come from."
+            } else {
+                "Hello! I'm your offline assistant. To ask questions about a document, start a chat with that document selected."
+            }
+            messageDao.insert(MessageEntity(conversationId = convId, role = "assistant", content = welcome))
+            convId
         }
 
-        convId
-    }
-
-        /** Send a user message, run RAG or LLM, and persist the final assistant response */
+    /** Fire-and-forget variant for the chat input. */
     fun sendMessage(
         conversationId: Long,
         userText: String,
         relevantDocumentIds: List<Long>,
-        answerLength: AnswerLength = AnswerLength.SHORT
+        answerLength: AnswerLength = AnswerLength.DEFAULT
     ) {
-        CoroutineScope(Dispatchers.IO).launch {
-            val requestStartedAt = SystemClock.elapsedRealtime()
-            var timerJob: kotlinx.coroutines.Job? = null
-            try {
-                Log.i("CHAT_LATENCY", "request_start convId=$conversationId docCount=${relevantDocumentIds.size} mode=$answerLength")
-                _chatState.value = ChatState.Retrieving
-                // Persist user message
-                val userMsg = MessageEntity(
-                    id = 0,
-                    conversationId = conversationId,
-                    role = "user",
-                    content = userText,
-                    timestamp = System.currentTimeMillis()
-                )
-                messageDao.insert(userMsg)
-                Log.i("CHAT_LATENCY", "user_message_persist_ms=${SystemClock.elapsedRealtime() - requestStartedAt}")
+        scope.launch { ask(conversationId, userText, relevantDocumentIds, answerLength) }
+    }
 
-                // Clean and filter valid document IDs (greater than 0)
-                val cleanDocIds = relevantDocumentIds.filter { it > 0 }
+    /** Stops the answer currently being generated (keeps what was written so far). */
+    fun stopGeneration() {
+        currentToken?.cancel()
+    }
 
-                _chatState.value = ChatState.Generating(0)
-                timerJob = launch(Dispatchers.Default) {
-                    var elapsed = 0
-                    try {
-                        while (isActive) {
-                            delay(1000)
-                            elapsed++
-                            if (_chatState.value is ChatState.Generating) {
-                                _chatState.value = ChatState.Generating(elapsed)
-                            } else {
-                                break
-                            }
-                        }
-                    } catch (_: CancellationException) {
-                        // Parent coroutine is ending; the UI busy state is cleared elsewhere.
+    /**
+     * Answers one question and returns when the answer (or an error message) has been stored.
+     * Used directly by the question queue so questions really run one after another.
+     */
+    suspend fun ask(
+        conversationId: Long,
+        userText: String,
+        relevantDocumentIds: List<Long>,
+        answerLength: AnswerLength = AnswerLength.DEFAULT
+    ) = requestMutex.withLock {
+        withContext(Dispatchers.IO) { runRequest(conversationId, userText, relevantDocumentIds, answerLength) }
+    }
+
+    private suspend fun runRequest(conversationId: Long, userText: String, relevantDocumentIds: List<Long>, answerLength: AnswerLength) {
+        val startedAt = SystemClock.elapsedRealtime()
+        val token = GenerationToken()
+        currentToken = token
+        val timedOut = AtomicBoolean(false)
+        var timer: Job? = null
+        var watchdog: Job? = null
+        val partial = StringBuilder()
+        val generatingSince = java.util.concurrent.atomic.AtomicLong(0L)
+        try {
+            val previousTurn = previousTurn(conversationId)
+            _chatState.value = ChatState.Retrieving
+            messageDao.insert(MessageEntity(conversationId = conversationId, role = "user", content = userText))
+
+            timer = scope.launch(Dispatchers.Default) {
+                while (isActive) {
+                    delay(1000)
+                    val since = generatingSince.get()
+                    val state = _chatState.value
+                    if (since > 0 && state is ChatState.Generating) {
+                        _chatState.value = state.copy(elapsedSeconds = ((SystemClock.elapsedRealtime() - since) / 1000).toInt())
                     }
-                }
-
-                // ─────────────────────────────────────────────────────────────
-                // ROUTING: no document selected → pure conversational LLM call
-                //          document(s) selected → existing RAG pipeline
-                // ─────────────────────────────────────────────────────────────
-                val answer: String
-                val sourcesData: String?
-
-                if (cleanDocIds.isEmpty()) {
-                    // Normal chat — no document context.
-                    // Call generateConversational() which bypasses:
-                    //   parsePrompt → parseSourceBlocks → CitationValidator.validate
-                    // None of those must ever execute on a no-document message.
-                    Log.i("RAG_DEBUG", "RAG_DEBUG_NORMAL_CHAT: query='$userText'")
-                    sourcesData = null
-                    val generationStartedAt = SystemClock.elapsedRealtime()
-                    answer = try {
-                        val deferred = kotlinx.coroutines.CoroutineScope(Dispatchers.Default).async {
-                            (llm as? GGUFLLM)?.generateConversational(userText, answerLength)
-                                ?: llm.generate(buildNormalPrompt(userText, answerLength), answerLength)
-                        }
-                        kotlinx.coroutines.withTimeout(120_000L) { deferred.await() }
-                    } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
-                        Log.e("RAG_DEBUG", "LLM inference exceeded 120s threshold on device")
-                        (llm as? GGUFLLM)?.cancel()
-                        throw IllegalStateException("Model generation timed out after 120 seconds. Please try again with a shorter query.")
-                    } catch (t: Throwable) {
-                        Log.e("RAG_DEBUG", "Conversational LLM error: ${t.message}", t)
-                        throw t
-                    }
-                    Log.i("CHAT_LATENCY", "path=no_document llm_total_ms=${SystemClock.elapsedRealtime() - generationStartedAt}")
-                } else {
-                    // RAG path — document(s) explicitly selected. Full pipeline unchanged.
-                    Log.i("RAG_DEBUG", "RAG_DEBUG_02_EMBEDDING_START")
-                    val embeddingStartedAt = SystemClock.elapsedRealtime()
-                    val queryEmbedding = embeddingEngine.getEmbedding(userText)
-                    Log.i("CHAT_LATENCY", "rag_query_embedding_ms=${SystemClock.elapsedRealtime() - embeddingStartedAt}")
-                    Log.i("RAG_DEBUG", "RAG_DEBUG_03_EMBEDDING_DONE: size=${queryEmbedding.size}")
-                    // Real-time dynamic RAM budget check
-                    val memoryConfig = MemoryGovernor.getAdaptiveConfig()
-                    Log.i("RAG_DEBUG", "MemoryGovernor: level=${memoryConfig.pressureLevel} pressure=${memoryConfig.pressureRatio} maxTokens=${memoryConfig.maxContextTokens}")
-
-                    val queryClassification = QueryIntentRouter.route(userText)
-
-                    val retrievalStartedAt = SystemClock.elapsedRealtime()
-                    val retrieved = vectorStore.retrieveDetailed(
-                        queryEmbedding = queryEmbedding,
-                        relevantDocumentIds = cleanDocIds,
-                        topK = 20,
-                        query = userText
-                    )
-                    Log.i("CHAT_LATENCY", "rag_retrieval_total_ms=${SystemClock.elapsedRealtime() - retrievalStartedAt} results=${retrieved.size}")
-                    Log.i("RAG_DEBUG", "RAG_DEBUG_04_RETRIEVAL_DONE: count=${retrieved.size} pages=${retrieved.map { it.chunk.pageNumber }.distinct()}")
-
-                    val rawEvidenceBudget = ContextAssembler.resolveEvidenceBudget(queryClassification.intent)
-                    val evidenceBudget = if (memoryConfig.pressureLevel == MemoryGovernor.PressureLevel.CRITICAL) {
-                        kotlin.math.min(rawEvidenceBudget, memoryConfig.maxContextTokens)
-                    } else rawEvidenceBudget
-
-                    val contextStartedAt = SystemClock.elapsedRealtime()
-                    val assembled = ContextAssembler.assemble(
-                        retrievedResults = retrieved,
-                        queryIntent = queryClassification.intent,
-                        queryClassification = queryClassification,
-                        maxEvidenceTokens = evidenceBudget
-                    )
-                    Log.i("CHAT_LATENCY", "rag_context_assembly_ms=${SystemClock.elapsedRealtime() - contextStartedAt}")
-                    Log.i("RAG_DEBUG", "RAG_DEBUG_05_CONTEXT_DONE: tokens=${assembled.totalEstimatedTokens} chars=${assembled.contextText.length}")
-                    sourcesData = assembled.sourcesJson
-
-                    answer = if (assembled.sourceBlocks.isEmpty() && assembled.contextText.startsWith("[")) {
-                        when {
-                            assembled.contextText.startsWith("[PAGE_NOT_FOUND:") -> {
-                                val p = assembled.contextText.removePrefix("[PAGE_NOT_FOUND:").removeSuffix("]").trim()
-                                "I couldn't find page $p in the provided document."
-                            }
-                            assembled.contextText.startsWith("[PAGE_RANGE_NOT_FOUND:") -> {
-                                val r = assembled.contextText.removePrefix("[PAGE_RANGE_NOT_FOUND:").removeSuffix("]").trim()
-                                "I couldn't find pages $r in the provided document."
-                            }
-                            else -> "I searched the provided document(s), but could not find information answering \"$userText\"."
-                        }
-                    } else {
-                        val ragPrompt = buildPrompt(assembled.contextText, userText, answerLength)
-                        val generationStartedAt = SystemClock.elapsedRealtime()
-                        val rawAnswer = try {
-                            val deferred = kotlinx.coroutines.CoroutineScope(Dispatchers.Default).async {
-                                llm.generate(ragPrompt, answerLength)
-                            }
-                            kotlinx.coroutines.withTimeout(120_000L) { deferred.await() }
-                        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
-                            Log.e("RAG_DEBUG", "LLM inference exceeded 120s threshold on device")
-                            (llm as? GGUFLLM)?.cancel()
-                            throw IllegalStateException("Model generation timed out after 120 seconds. Please try again with a shorter query.")
-                        } catch (t: Throwable) {
-                            Log.e("RAG_DEBUG", "LLM inference encountered error: ${t.message}", t)
-                            throw t
-                        }
-                        Log.i("CHAT_LATENCY", "path=document_rag llm_total_ms=${SystemClock.elapsedRealtime() - generationStartedAt}")
-                        Log.i("RAG_DEBUG", "RAG_DEBUG_10_REPOSITORY_RETURN: len=${rawAnswer.length}")
-                        if (rawAnswer.isBlank()) {
-                            throw IllegalStateException("Local neural model produced an empty answer.")
-                        }
-                        rawAnswer
-                    }
-                }
-
-                timerJob?.cancelAndJoin()
-
-                // CRITICAL: Set state to Idle IMMEDIATELY after generation completes,
-                // BEFORE persistence. This ensures the UI "Thinking..." indicator clears
-                // even if persistence takes time or encounters issues.
-                _chatState.value = ChatState.Idle
-
-                val persistStartedAt = SystemClock.elapsedRealtime()
-                messageDao.insert(
-                    MessageEntity(
-                        id = 0,
-                        conversationId = conversationId,
-                        role = "assistant",
-                        content = answer,
-                        timestamp = System.currentTimeMillis(),
-                        sources = sourcesData
-                    )
-                )
-                Log.i("CHAT_LATENCY", "assistant_response_persist_ms=${SystemClock.elapsedRealtime() - persistStartedAt}")
-
-                Log.i(
-                    "CHAT_LATENCY",
-                    "request_complete path=${if (cleanDocIds.isEmpty()) "no_document" else "document_rag"} total_ms=${SystemClock.elapsedRealtime() - requestStartedAt} answer_chars=${answer.length}"
-                )
-            } catch (t: Throwable) {
-                timerJob?.cancelAndJoin()
-                Log.e("RAG_DEBUG", "RAG_DEBUG_12_ERROR_STATE: error=${t.message}", t)
-                Log.e(TAG, "Chat generation failed", t)
-                val rawMsg = t.message ?: "Unknown error"
-                val errorMsg = when {
-                    rawMsg.contains("is not installed", ignoreCase = true) || rawMsg.contains("model file not found", ignoreCase = true) || rawMsg.contains("Real GGUF execution required", ignoreCase = true) ->
-                        "Local LLM model is not installed. Open Settings -> Model Management and import a GGUF model."
-                    rawMsg.contains("cannot be read", ignoreCase = true) ->
-                        "Installed model cannot be read. Re-import the model."
-                    rawMsg.contains("not a valid", ignoreCase = true) || rawMsg.contains("unsupported GGUF", ignoreCase = true) ->
-                        "The selected file is not a valid or supported GGUF model."
-                    rawMsg.contains("memory", ignoreCase = true) ->
-                        "Unable to load the model because the device does not have enough available memory."
-                    rawMsg.contains("initialize the local LLM", ignoreCase = true) || rawMsg.contains("Failed to load local GGUF model", ignoreCase = true) ->
-                        "Unable to initialize the local LLM. Check the model and device compatibility."
-                    rawMsg.contains("generation failed", ignoreCase = true) ->
-                        "Local generation failed. The model remains installed, but the current generation could not be completed."
-                    else ->
-                        "An error occurred while answering: $rawMsg"
-                }
-                try {
-                    messageDao.insert(
-                        MessageEntity(
-                            id = 0,
-                            conversationId = conversationId,
-                            role = "assistant",
-                            content = errorMsg,
-                            timestamp = System.currentTimeMillis()
-                        )
-                    )
-                } catch (insertError: Throwable) {
-                    Log.e(TAG, "Failed to insert error message into conversation", insertError)
-                }
-                _chatState.value = ChatState.Error(errorMsg)
-            } finally {
-                timerJob?.cancelAndJoin()
-                if (_chatState.value is ChatState.Generating || _chatState.value is ChatState.Retrieving || _chatState.value is ChatState.Thinking) {
-                    _chatState.value = ChatState.Idle
                 }
             }
+
+            val request = GenerationRequest(
+                token = token,
+                previousTurn = previousTurn,
+                onStarted = {
+                    generatingSince.set(SystemClock.elapsedRealtime())
+                    _chatState.value = ChatState.Generating(0, "")
+                    // The timeout covers generation only (not model loading or retrieval).
+                    watchdog = scope.launch(Dispatchers.Default) {
+                        delay(llm.generationTimeoutMs(answerLength))
+                        timedOut.set(true)
+                        token.cancel()
+                    }
+                },
+                onPartial = { text ->
+                    partial.setLength(0)
+                    partial.append(text)
+                    val state = _chatState.value
+                    if (state is ChatState.Generating) _chatState.value = state.copy(partialText = text)
+                }
+            )
+
+            val docIds = relevantDocumentIds.filter { it > 0 }.distinct()
+            val reply = if (docIds.isEmpty()) {
+                _chatState.value = ChatState.Preparing
+                Reply(llm.generateChat(userText, answerLength, request), sources = null)
+            } else {
+                answerFromDocuments(userText, docIds, answerLength, request)
+            }
+            withContext(NonCancellable) {
+                messageDao.insert(MessageEntity(conversationId = conversationId, role = "assistant", content = reply.text, sources = reply.sources))
+            }
+            _chatState.value = ChatState.Idle
+            Log.i(TAG, "Answered in ${SystemClock.elapsedRealtime() - startedAt} ms")
+        } catch (e: GenerationCancelledException) {
+            val kept = e.partialAnswer.ifBlank { partial.toString() }.trim()
+            val note = if (timedOut.get()) {
+                "_The answer was stopped because it took too long. Try the Short answer length or a smaller model._"
+            } else {
+                "_Stopped._"
+            }
+            withContext(NonCancellable) {
+                messageDao.insert(
+                    MessageEntity(conversationId = conversationId, role = "assistant", content = if (kept.isNotEmpty()) "$kept\n\n$note" else ERROR_PREFIX + note)
+                )
+            }
+            _chatState.value = if (timedOut.get()) ChatState.Error("The model took too long to answer and was stopped.") else ChatState.Idle
+        } catch (e: CancellationException) {
+            token.cancel()
+            _chatState.value = ChatState.Idle
+            throw e
+        } catch (t: Throwable) {
+            reportFailure(conversationId, t)
+        } finally {
+            watchdog?.cancel()
+            timer?.cancel()
+            if (currentToken === token) currentToken = null
+            val state = _chatState.value
+            if (state is ChatState.Generating || state is ChatState.Retrieving || state is ChatState.Preparing) _chatState.value = ChatState.Idle
         }
     }
 
-    private fun buildNormalPrompt(question: String, answerLength: AnswerLength = AnswerLength.SHORT): String {
-        val lengthInstruction = when (answerLength) {
-            AnswerLength.SHORT -> """
-- Give the minimum sufficient answer supported by the evidence.
-- Never invent facts.
-- Never use outside knowledge.
-- Never repeat a fact.
-- Never include irrelevant evidence.
-- Do not create empty list items.
-- Do not output headings as answers.
-- For lists, preserve all requested items.
-- Stop when the relevant evidence has been adequately covered.
-""".trimIndent()
-            AnswerLength.LONG -> """
-- Give the most complete answer that is directly relevant to the question and supported by the evidence.
-- Never invent facts.
-- Never use outside knowledge.
-- Never repeat a fact.
-- Never include irrelevant evidence.
-- Do not create empty list items.
-- Do not output headings as answers.
-- For step-by-step, troubleshooting, or checklist questions, provide numbered points followed by a brief grounded explanation of what that step means in context.
-- Explain each point using only the retrieved evidence and keep the explanation tied to the document wording.
-- For list questions, preserve every requested item with its grounded description from the source.
-- Format lists with clean numbering (e.g. 1. Item - Explanation based on the source evidence).
-- Include all relevant points without skipping or truncating the answer.
-- Cover additional distinct relevant evidence when it helps explain the answer.
-- Stop when the relevant evidence has been adequately covered.
-""".trimIndent()
+    /** The last completed question/answer pair of the conversation (errors and the welcome text are skipped). */
+    private suspend fun previousTurn(conversationId: Long): ChatTurn? {
+        val messages = messageDao.getMessagesForConversation(conversationId).first()
+        for (i in messages.indices.reversed()) {
+            val m = messages[i]
+            if (m.role == "assistant" && !m.content.startsWith(ERROR_PREFIX) && i > 0 && messages[i - 1].role == "user") {
+                return ChatTurn(messages[i - 1].content, m.content)
+            }
         }
-        return """
-[ANSWER_LENGTH: ${answerLength.name}]
-You are a helpful offline AI assistant. $lengthInstruction
-
-Question: $question
-
-Answer:
-""".trimIndent()
+        return null
     }
 
-    private fun buildPrompt(context: String, question: String, answerLength: AnswerLength = AnswerLength.SHORT): String {
-        val lengthInstruction = when (answerLength) {
-            AnswerLength.SHORT -> """
-- Give the minimum sufficient answer supported by the evidence.
-- Never invent facts.
-- Never use outside knowledge.
-- Never repeat a fact.
-- Never include irrelevant evidence.
-- Do not create empty list items.
-- Do not output headings as answers.
-- For lists, preserve all requested items.
-- Stop when the relevant evidence has been adequately covered.
-""".trimIndent()
-            AnswerLength.LONG -> """
-- Give the most complete answer that is directly relevant to the question and supported by the evidence.
-- Never invent facts.
-- Never use outside knowledge.
-- Never repeat a fact.
-- Never include irrelevant evidence.
-- Do not create empty list items.
-- Do not output headings as answers.
-- For step-by-step, troubleshooting, or checklist questions, provide numbered points followed by a brief grounded explanation of what that step means in context.
-- Explain each point using only the retrieved evidence and keep the explanation tied to the document wording.
-- For list questions, preserve every requested item with its grounded description from the source.
-- Format lists with clean numbering (e.g. 1. Item - Explanation based on the source evidence).
-- Include all relevant points without skipping or truncating the answer.
-- Cover additional distinct relevant evidence when it helps explain the answer.
-- Stop when the relevant evidence has been adequately covered.
-""".trimIndent()
+    private suspend fun reportFailure(conversationId: Long, t: Throwable) {
+        Log.e(TAG, "Chat generation failed", t)
+        val errorMsg = userFacingError(t)
+        withContext(NonCancellable) {
+            runCatching {
+                messageDao.insert(MessageEntity(conversationId = conversationId, role = "assistant", content = ERROR_PREFIX + errorMsg))
+            }
         }
-        return """
-[ANSWER_LENGTH: ${answerLength.name}]
-You are an offline AI assistant. Use the following extracted document context to answer the user's question.
-
-Context:
-$context
-
-Question: $question
-
-Answer:
-$lengthInstruction
-Reference the page numbers when appropriate.
-""".trimIndent()
+        _chatState.value = ChatState.Error(errorMsg)
     }
 
-    /** Expose context assembly for testing and direct pipeline queries */
-    fun assembleContext(
-        retrievedResults: List<com.siddu.offlinedocai.ai.retrieval.RetrievalResult>,
-        queryIntent: com.siddu.offlinedocai.ai.retrieval.QueryIntent,
-        queryClassification: QueryClassification? = null,
-        maxEvidenceTokens: Int = ContextAssembler.DEFAULT_MAX_CONTEXT_TOKENS
-    ): AssembledContext {
-        return com.siddu.offlinedocai.ai.retrieval.ContextAssembler.assemble(
-            retrievedResults = retrievedResults,
-            queryIntent = queryIntent,
-            queryClassification = queryClassification,
-            maxEvidenceTokens = maxEvidenceTokens
+    private data class Reply(val text: String, val sources: String?)
+
+    private suspend fun answerFromDocuments(question: String, requestedIds: List<Long>, answerLength: AnswerLength, request: GenerationRequest): Reply {
+        val modelId = embedder.modelId
+        val documents = documentDao.getByIds(requestedIds)
+        val ready = documents.filter { DocumentRepository.isSearchable(it, modelId) }
+        if (ready.isEmpty()) {
+            val updating = documents.any { it.status == DocumentRepository.STATUS_PROCESSING || it.status == DocumentRepository.STATUS_COMPLETED }
+            return Reply(
+                if (updating) "The selected document is still being indexed for the current search model. Please ask again when indexing has finished."
+                else "The selected document could not be indexed, so it cannot be searched. Re-import it from the Library.",
+                sources = null
+            )
+        }
+
+        // 1. Classify once; the same classification drives retrieval and context assembly.
+        val classification = QueryIntentRouter.route(question)
+
+        // 2. Embed the user's own words plus sub-queries (comparison sides, or the follow-up resolved with the previous question).
+        val previousQuestion = request.previousTurn?.question
+        val followUpQuery = if (previousQuestion != null && isFollowUp(question) &&
+            classification.intent != QueryIntent.PAGE_LOOKUP && classification.intent != QueryIntent.PAGE_RANGE && classification.intent != QueryIntent.SUMMARY
+        ) "$previousQuestion $question" else null
+        val query = SearchQuery(question, embedder.embedQuery(question))
+        val subQueries = (classification.subQueries + listOfNotNull(followUpQuery)).map { SearchQuery(it, embedder.embedQuery(it)) }
+
+        // 3. Retrieve (only vectors of the active embedding model).
+        val results = vectorStore.retrieve(query, ready.map { it.id }, classification, subQueries, embeddingModelId = modelId)
+        if (results.isEmpty()) return Reply(notFoundMessage(classification), sources = null)
+
+        // 4. Nothing related at all: say so without spending a minute of generation on it.
+        if (!passesRelevanceGate(results, listOfNotNull(question, followUpQuery), classification)) {
+            Log.i(TAG, "Relevance gate: no passage is related to \"$question\"")
+            return Reply(PromptBuilder.NOT_FOUND_ANSWER, sources = null)
+        }
+
+        // 5. Budget evidence from the real context window, capped for latency.
+        _chatState.value = ChatState.Preparing
+        val available = llm.availableEvidenceTokens(question, answerLength)
+        val budget = minOf(available, evidenceCap(classification.intent))
+        val assembled = ContextAssembler.assemble(
+            results = results,
+            classification = classification,
+            budgetTokens = budget,
+            tokenCounter = llm::countTokens,
+            documentNames = if (ready.size > 1) ready.associate { it.id to it.name } else emptyMap()
         )
+        Log.i(TAG, "intent=${classification.intent} results=${results.size} blocks=${assembled.sourceBlocks.size} evidenceTokens=${assembled.usedTokens}/$budget limited=${assembled.isBudgetLimited}")
+        if (assembled.isEmpty) return Reply(notFoundMessage(classification), sources = null)
+
+        // 6. Generate.
+        val answer = llm.generateGrounded(assembled, question, answerLength, request)
+        val sources = if (PromptBuilder.isNotFoundAnswer(answer)) null else assembled.sourcesJson
+        return Reply(answer, sources)
+    }
+
+    /**
+     * True when at least one passage is plausibly related: its embedding similarity is above the
+     * model's floor, or it contains at least half of the question's content words. Structural
+     * intents (page lookups, summaries) always pass.
+     */
+    private fun passesRelevanceGate(results: List<RetrievalResult>, queries: List<String>, classification: QueryClassification): Boolean {
+        if (classification.intent == QueryIntent.PAGE_LOOKUP || classification.intent == QueryIntent.PAGE_RANGE || classification.intent == QueryIntent.SUMMARY) return true
+        val floor = AvailableEmbeddingModels.byId(embedder.modelId)?.relevanceFloor ?: 0.30f
+        val hybrid = results.filter { it.source == RetrievalSource.HYBRID }
+        if (hybrid.any { it.denseScore >= floor }) return true
+        val termSets = queries.map { TextAnalyzer.terms(it).toSet() }.filter { it.isNotEmpty() }
+        if (termSets.isEmpty()) return true
+        return hybrid.any { r ->
+            val chunkTerms = TextAnalyzer.terms(listOfNotNull(r.chunk.sectionTitle, r.chunk.text).joinToString("\n")).toSet()
+            termSets.any { terms -> terms.count { it in chunkTerms } * 2 >= terms.size }
+        }
+    }
+
+    private fun notFoundMessage(classification: QueryClassification): String = when (classification.intent) {
+        QueryIntent.PAGE_LOOKUP -> "Page ${classification.pageStart} has no extractable text in the selected document(s), or the document has fewer pages."
+        QueryIntent.PAGE_RANGE -> "Pages ${classification.pageStart}-${classification.pageEnd} have no extractable text in the selected document(s), or the document has fewer pages."
+        else -> PromptBuilder.NOT_FOUND_ANSWER
+    }
+
+    private fun userFacingError(t: Throwable): String {
+        val raw = t.message ?: "Unknown error"
+        return when {
+            raw.contains("No language model is installed", ignoreCase = true) || raw.contains("model file not found", ignoreCase = true) ->
+                "No language model is installed. Open Settings to download or import one."
+            raw.contains("cannot be read", ignoreCase = true) -> "Installed model cannot be read. Re-import the model."
+            raw.contains("not a valid", ignoreCase = true) -> "The selected file is not a valid or supported GGUF model."
+            raw.contains("embedding model", ignoreCase = true) -> raw
+            raw.contains("memory", ignoreCase = true) -> "Unable to load the model because the device does not have enough available memory. Try a smaller model."
+            raw.contains("Unable to load this model", ignoreCase = true) || raw.contains("initialize the local LLM", ignoreCase = true) -> raw
+            raw.contains("generation failed", ignoreCase = true) || raw.contains("empty answer", ignoreCase = true) ->
+                "Local generation failed. The model remains installed, but this answer could not be completed."
+            else -> "An error occurred while answering: $raw"
+        }
     }
 
     sealed class ChatState {
         object Idle : ChatState()
-        object Thinking : ChatState()
         object Retrieving : ChatState()
-        data class Generating(val elapsedSeconds: Int = 0) : ChatState()
+        /** Loading the model / preparing the prompt. */
+        object Preparing : ChatState()
+        data class Generating(val elapsedSeconds: Int = 0, val partialText: String = "") : ChatState()
         data class Error(val message: String) : ChatState()
     }
 }

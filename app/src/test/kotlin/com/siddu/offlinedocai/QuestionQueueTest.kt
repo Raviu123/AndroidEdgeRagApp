@@ -17,36 +17,36 @@ class QuestionQueueTest {
     fun testParseJsonArrayOfStrings() {
         val json = """
             [
-              "What is grafting?",
+              "What is the refund policy?",
               "What tools are needed?",
-              "How to perform cleft grafting?"
+              "How do I request an exchange?"
             ]
         """.trimIndent()
 
         val parsed = QuestionQueueParser.parseQuestions(json)
         assertEquals(3, parsed.size)
-        assertEquals("What is grafting?", parsed[0])
+        assertEquals("What is the refund policy?", parsed[0])
         assertEquals("What tools are needed?", parsed[1])
-        assertEquals("How to perform cleft grafting?", parsed[2])
+        assertEquals("How do I request an exchange?", parsed[2])
     }
 
     @Test
     fun testParseJsonArrayOfObjects() {
         val json = """
             [
-              {"question": "Explain rootstock selection."},
-              {"q": "What is the cambium layer?"},
-              {"prompt": "How to care for a graft union?"},
-              {"text": "What causes graft incompatibility?"}
+              {"question": "Explain the shipping options."},
+              {"q": "What is the warranty period?"},
+              {"prompt": "How do I reset my password?"},
+              {"text": "What causes delivery delays?"}
             ]
         """.trimIndent()
 
         val parsed = QuestionQueueParser.parseQuestions(json)
         assertEquals(4, parsed.size)
-        assertEquals("Explain rootstock selection.", parsed[0])
-        assertEquals("What is the cambium layer?", parsed[1])
-        assertEquals("How to care for a graft union?", parsed[2])
-        assertEquals("What causes graft incompatibility?", parsed[3])
+        assertEquals("Explain the shipping options.", parsed[0])
+        assertEquals("What is the warranty period?", parsed[1])
+        assertEquals("How do I reset my password?", parsed[2])
+        assertEquals("What causes delivery delays?", parsed[3])
     }
 
     @Test
@@ -71,16 +71,16 @@ class QuestionQueueTest {
     @Test
     fun testParseNewlineDelimitedFallback() {
         val text = """
-            1. First question about grafting?
-            2. Second question about cambium?
+            1. First question about shipping?
+            2. Second question about warranties?
             - Third question about timing?
             * Fourth question about tools?
         """.trimIndent()
 
         val parsed = QuestionQueueParser.parseQuestions(text)
         assertEquals(4, parsed.size)
-        assertEquals("First question about grafting?", parsed[0])
-        assertEquals("Second question about cambium?", parsed[1])
+        assertEquals("First question about shipping?", parsed[0])
+        assertEquals("Second question about warranties?", parsed[1])
         assertEquals("Third question about timing?", parsed[2])
         assertEquals("Fourth question about tools?", parsed[3])
     }

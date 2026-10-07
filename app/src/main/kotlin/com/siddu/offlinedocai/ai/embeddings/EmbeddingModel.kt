@@ -1,14 +1,20 @@
 package com.siddu.offlinedocai.ai.embeddings
 
 /**
- * Interface for an embedding model that can transform a piece of text into a vector of floats.
- * Implementations should load a GGUF model file from the app's private storage and run inference
- * locally on the device. For the prototype a deterministic fallback is provided.
+ * A sentence-embedding model. Documents and queries are embedded separately because some models
+ * (e.g. BGE) expect an instruction prefix on queries only. Implementations never return placeholder
+ * vectors: a failure is thrown so it can be shown to the user.
  */
 interface EmbeddingModel {
-    /**
-     * Compute an embedding for the given [text]. The returned FloatArray length is defined by the
-     * underlying model (e.g., 384, 512, 768). The function runs on a background dispatcher.
-     */
+    /** Embedding of a document passage (chunk). */
     suspend fun getEmbedding(text: String): FloatArray
+
+    /** Embedding of a search query. */
+    suspend fun embedQuery(text: String): FloatArray = getEmbedding(text)
+
+    /** Embeddings of several passages; implementations may batch them. */
+    suspend fun embedDocuments(texts: List<String>): List<FloatArray> = texts.map { getEmbedding(it) }
+
+    /** Identifier stored with every vector; vectors with different ids are never compared. */
+    val modelId: String
 }

@@ -1,13 +1,30 @@
 package com.siddu.offlinedocai.ai.chunking
 
 import com.siddu.offlinedocai.domain.rag.ExtractedPage
+import java.text.BreakIterator
+import java.util.Locale
 
 /**
- * Structure-Preserving Hierarchical Document Chunker.
- * Preserves paragraphs, section headings, bullet lists, numbered items, table rows,
- * and individual line boundaries without flattening text into a single run-on line.
+ * Structure-preserving, token-bounded document chunker.
+ *
+ * 1. Each page is parsed into structural blocks (headings, list items, table rows, paragraphs);
+ *    paragraphs that continue across a page break are re-joined.
+ * 2. Blocks are packed into chunks measured in **embedding-model tokens** (the same WordPiece
+ *    tokenizer the embedder uses), so no chunk is ever silently truncated at embedding time.
+ * 3. Oversized blocks are split at sentence boundaries (and, for run-on "sentences", at word
+ *    boundaries), never mid-word.
+ * 4. Consecutive chunks of the same section share 1–2 trailing sentences of overlap so facts that
+ *    straddle a boundary remain retrievable. A new section always starts a new chunk.
  */
 object TextChunker {
+
+    /** Bump when chunking behaviour changes; part of the document index signature. */
+    const val VERSION = 3
+
+    const val DEFAULT_TARGET_TOKENS = 128
+    const val DEFAULT_MAX_TOKENS = 180
+    const val DEFAULT_OVERLAP_TOKENS = 32
+    private const val HEADING_RESERVE_TOKENS = 24
 
     data class Chunk(
         val index: Int,
@@ -15,473 +32,396 @@ object TextChunker {
         val text: String,
         val pageSpan: String = "$pageNumber",
         val sectionTitle: String? = null,
-        val paragraphIndex: Int = 0
+        val paragraphIndex: Int = 0,
+        val tokenCount: Int = 0
     )
 
-    private enum class BlockType {
-        HEADING,
-        LIST_ITEM,
-        TABLE_ROW,
-        PARAGRAPH
+    /** Fallback counter (~1.3 WordPiece tokens per word) for callers without a tokenizer. */
+    val approximateTokenCounter: (String) -> Int = { text ->
+        val words = text.split(WHITESPACE).count { it.isNotEmpty() }
+        val punctuation = text.count { !it.isLetterOrDigit() && !it.isWhitespace() }
+        ((words * 1.3) + punctuation * 0.5).toInt()
     }
 
-    private data class SemanticBlock(
+    private enum class BlockType { HEADING, LIST_ITEM, TABLE_ROW, PARAGRAPH }
+
+    private data class Block(
         val startPage: Int,
         val endPage: Int,
         val sectionTitle: String?,
-        val blockType: BlockType,
-        val text: String,
-        val followedByEmptyLine: Boolean = true
+        val type: BlockType,
+        val text: String
     )
 
-    /**
-     * Chunk a full multi-page document while preserving structure, headings, lists, tables,
-     * stable document ordering, and cross-page semantic continuity.
-     *
-     * @param pages list of extracted pages in chronological document order.
-     * @param targetWords target word count per retrieval chunk (~350 words).
-     * @param maxWords maximum word threshold before splitting at sentence boundaries (~500 words).
-     * @param overlapWords word overlap for semantic continuity across chunk boundaries (~60 words).
-     */
+    /** Smallest packable piece: a whole block, or one sentence (or word window) of an oversized block. */
+    private data class Unit(
+        val text: String,
+        val tokens: Int,
+        val startPage: Int,
+        val endPage: Int,
+        val sectionTitle: String?,
+        val type: BlockType,
+        val blockId: Int
+    )
+
+    private val WHITESPACE = Regex("\\s+")
+    private val MARKDOWN_HEADING = Regex("^#{1,6}\\s+\\S")
+    private val OUTLINE_HEADING = Regex(
+        """^(?:(?:chapter|section|appendix|part)\s+[0-9ivxlcdmIVXLCDM]+[.:]?|[0-9]+(?:\.[0-9]+){0,3}\.?)\s+\p{Lu}[^.!?]{0,70}$""",
+        RegexOption.IGNORE_CASE
+    )
+    private val LABEL_HEADING = Regex("""^[\p{L}0-9][\p{L}0-9\s/&_\-]{1,48}:$""")
+    private val LIST_ITEM = Regex("""^(?:[•\-*‣◦⁃∙▪●○]|\d{1,3}[.)]|[a-zA-Z][.)]|\([0-9a-zA-Z]{1,3}\))\s+\S""")
+
     fun chunkDocument(
         pages: List<ExtractedPage>,
-        targetWords: Int = 350,
-        maxWords: Int = 500,
-        overlapWords: Int = 60
+        tokenCounter: (String) -> Int = approximateTokenCounter,
+        targetTokens: Int = DEFAULT_TARGET_TOKENS,
+        maxTokens: Int = DEFAULT_MAX_TOKENS,
+        overlapTokens: Int = DEFAULT_OVERLAP_TOKENS
     ): List<Chunk> {
+        require(maxTokens > 0 && targetTokens in 1..maxTokens) { "Invalid chunk token limits" }
         if (pages.isEmpty()) return emptyList()
+        val blocks = mergeCrossPageParagraphs(parseBlocks(pages))
+        // Leave room for a section heading to share the chunk with the unit that follows it.
+        val unitLimit = (maxTokens - HEADING_RESERVE_TOKENS).coerceAtLeast(maxTokens / 2)
+        val units = toUnits(blocks, tokenCounter, unitLimit)
+        return pack(units, tokenCounter, targetTokens, maxTokens, overlapTokens)
+    }
 
-        // 1. Parse each page into structural semantic blocks
-        val rawBlocks = mutableListOf<SemanticBlock>()
-        var currentSectionTitle: String? = null
+    /** Backward-compatible single-page API. */
+    fun chunkText(text: String, pageNumber: Int, tokenCounter: (String) -> Int = approximateTokenCounter): List<Chunk> =
+        chunkDocument(listOf(ExtractedPage(pageNumber, text)), tokenCounter)
+
+    // ---------------------------------------------------------------------------------------------
+    // 1. Structural parsing
+    // ---------------------------------------------------------------------------------------------
+
+    private fun parseBlocks(pages: List<ExtractedPage>): List<Block> {
+        val blocks = mutableListOf<Block>()
+        var section: String? = null
 
         for (page in pages) {
-            val pageLines = page.text.lines()
+            val lines = page.text.lines()
             var i = 0
+            while (i < lines.size) {
+                val line = lines[i].trim()
+                if (line.isEmpty()) { i++; continue }
 
-            while (i < pageLines.size) {
-                val rawLine = pageLines[i]
-                val trimmed = rawLine.trim()
+                val prevEmpty = i == 0 || lines[i - 1].isBlank()
+                val nextEmpty = i + 1 >= lines.size || lines[i + 1].isBlank()
 
-                if (trimmed.isEmpty()) {
+                if (isHeading(line, prevEmpty, nextEmpty)) {
+                    section = line.removePrefix("#").trimStart('#', ' ').trimEnd(':').trim().ifEmpty { line }
+                    blocks.add(Block(page.pageNumber, page.pageNumber, section, BlockType.HEADING, line))
                     i++
                     continue
                 }
 
-                val prevLineEmpty = (i == 0) || pageLines[i - 1].trim().isEmpty()
-                val nextLineEmpty = (i + 1 >= pageLines.size) || pageLines[i + 1].trim().isEmpty()
-
-                // Check for generic structural heading
-                val headingTitle = detectHeading(trimmed, prevLineEmpty, nextLineEmpty)
-                if (headingTitle != null) {
-                    currentSectionTitle = headingTitle
-                    rawBlocks.add(
-                        SemanticBlock(
-                            startPage = page.pageNumber,
-                            endPage = page.pageNumber,
-                            sectionTitle = currentSectionTitle,
-                            blockType = BlockType.HEADING,
-                            text = trimmed,
-                            followedByEmptyLine = nextLineEmpty
-                        )
-                    )
-                    i++
-                    continue
-                }
-
-                // Check for table row (| col1 | col2 | or tab-separated)
-                if (isTableRow(trimmed)) {
-                    val tableLines = mutableListOf<String>()
-                    while (i < pageLines.size && isTableRow(pageLines[i].trim())) {
-                        tableLines.add(pageLines[i].trim())
-                        i++
+                if (isTableRow(line)) {
+                    val rows = mutableListOf<String>()
+                    while (i < lines.size && isTableRow(lines[i].trim())) {
+                        rows.add(lines[i].trim()); i++
                     }
-                    val tableNextEmpty = (i >= pageLines.size) || pageLines[i].trim().isEmpty()
-                    rawBlocks.add(
-                        SemanticBlock(
-                            startPage = page.pageNumber,
-                            endPage = page.pageNumber,
-                            sectionTitle = currentSectionTitle,
-                            blockType = BlockType.TABLE_ROW,
-                            text = tableLines.joinToString("\n"),
-                            followedByEmptyLine = tableNextEmpty
-                        )
-                    )
+                    blocks.add(Block(page.pageNumber, page.pageNumber, section, BlockType.TABLE_ROW, rows.joinToString("\n")))
                     continue
                 }
 
-                // Check for list item (bullet or numbered)
-                if (isListItem(trimmed)) {
-                    val listLines = mutableListOf<String>()
-                    listLines.add(trimmed)
+                if (LIST_ITEM.containsMatchIn(line)) {
+                    val itemLines = mutableListOf(line)
                     i++
-                    // Collect following indented lines or continuation of list item
-                    while (i < pageLines.size) {
-                        val nextTrim = pageLines[i].trim()
-                        if (nextTrim.isEmpty()) break
-                        if (isListItem(nextTrim) || isTableRow(nextTrim) || detectHeading(nextTrim, prevLineEmpty = false, nextLineEmpty = false) != null) {
-                            break
-                        }
-                        if (pageLines[i].startsWith("  ") || pageLines[i].startsWith("\t") || !nextTrim[0].isUpperCase()) {
-                            listLines.add(nextTrim)
-                            i++
-                        } else {
-                            break
-                        }
+                    while (i < lines.size) {
+                        val raw = lines[i]
+                        val next = raw.trim()
+                        if (next.isEmpty() || LIST_ITEM.containsMatchIn(next) || isTableRow(next) ||
+                            isHeading(next, prevEmpty = false, nextEmpty = false)) break
+                        val indented = raw.startsWith("  ") || raw.startsWith("\t")
+                        if (indented || !next[0].isUpperCase()) { itemLines.add(next); i++ } else break
                     }
-                    val listNextEmpty = (i >= pageLines.size) || pageLines[i].trim().isEmpty()
-                    rawBlocks.add(
-                        SemanticBlock(
-                            startPage = page.pageNumber,
-                            endPage = page.pageNumber,
-                            sectionTitle = currentSectionTitle,
-                            blockType = BlockType.LIST_ITEM,
-                            text = listLines.joinToString("\n"),
-                            followedByEmptyLine = listNextEmpty
-                        )
-                    )
+                    blocks.add(Block(page.pageNumber, page.pageNumber, section, BlockType.LIST_ITEM, joinLines(itemLines)))
                     continue
                 }
 
-                // Standard paragraph / line group: accumulate until blank line, heading, list, or table
                 val paraLines = mutableListOf<String>()
-                while (i < pageLines.size) {
-                    val pLine = pageLines[i].trim()
-                    if (pLine.isEmpty()) break
-                    if (detectHeading(pLine, prevLineEmpty = false, nextLineEmpty = false) != null || isListItem(pLine) || isTableRow(pLine)) {
-                        break
-                    }
-                    paraLines.add(pLine)
-                    i++
+                while (i < lines.size) {
+                    val next = lines[i].trim()
+                    if (next.isEmpty()) break
+                    if (paraLines.isNotEmpty() &&
+                        (isHeading(next, prevEmpty = false, nextEmpty = false) || LIST_ITEM.containsMatchIn(next) || isTableRow(next))
+                    ) break
+                    paraLines.add(next); i++
                 }
-
-                val paraNextEmpty = (i >= pageLines.size) || pageLines[i].trim().isEmpty()
                 if (paraLines.isNotEmpty()) {
-                    rawBlocks.add(
-                        SemanticBlock(
-                            startPage = page.pageNumber,
-                            endPage = page.pageNumber,
-                            sectionTitle = currentSectionTitle,
-                            blockType = BlockType.PARAGRAPH,
-                            text = joinParagraphLines(paraLines),
-                            followedByEmptyLine = paraNextEmpty
-                        )
-                    )
+                    blocks.add(Block(page.pageNumber, page.pageNumber, section, BlockType.PARAGRAPH, joinLines(paraLines)))
                 }
             }
         }
+        return blocks
+    }
 
-        // 2. Cross-Page Semantic Continuity: merge blocks across page transitions if sentences continue
-        val mergedBlocks = mutableListOf<SemanticBlock>()
-        var bIdx = 0
-        while (bIdx < rawBlocks.size) {
-            val current = rawBlocks[bIdx]
-            if (bIdx + 1 < rawBlocks.size) {
-                val next = rawBlocks[bIdx + 1]
-                val isCrossPageContinuation = current.endPage < next.startPage &&
-                    current.blockType == BlockType.PARAGRAPH &&
-                    next.blockType == BlockType.PARAGRAPH &&
-                    isSentenceContinuation(current.text, next.text)
+    private fun mergeCrossPageParagraphs(blocks: List<Block>): List<Block> {
+        val merged = mutableListOf<Block>()
+        for (block in blocks) {
+            val last = merged.lastOrNull()
+            if (last != null && last.endPage < block.startPage &&
+                last.type == BlockType.PARAGRAPH && block.type == BlockType.PARAGRAPH &&
+                continuesSentence(last.text, block.text)
+            ) {
+                val joined = if (last.text.endsWith("-")) last.text.dropLast(1) + block.text else "${last.text} ${block.text}"
+                merged[merged.size - 1] = last.copy(endPage = block.endPage, text = joined)
+            } else {
+                merged.add(block)
+            }
+        }
+        return merged
+    }
 
-                if (isCrossPageContinuation) {
-                    val combinedText = if (current.text.endsWith("-")) {
-                        current.text.removeSuffix("-") + next.text
-                    } else {
-                        "${current.text} ${next.text}"
+    /**
+     * Conservative heading detection. A false positive is costly (it splits chunks and mislabels
+     * sections), so only clearly heading-shaped lines qualify.
+     */
+    private fun isHeading(line: String, prevEmpty: Boolean, nextEmpty: Boolean): Boolean {
+        if (line.length > 90) return false
+        if (MARKDOWN_HEADING.containsMatchIn(line)) return true
+        val endsLikeSentence = line.endsWith(".") || line.endsWith(",") || line.endsWith(";")
+        if (OUTLINE_HEADING.matches(line) && !endsLikeSentence) return true
+        if (LABEL_HEADING.matches(line) && line.split(WHITESPACE).size <= 6) return true
+
+        val letters = line.count { it.isLetter() }
+        if (letters >= 3 && line.length <= 60 && !endsLikeSentence && line.none { it.isLowerCase() } &&
+            (prevEmpty || nextEmpty)
+        ) return true
+
+        // Short Title Case line standing on its own between blank lines.
+        val words = line.split(WHITESPACE)
+        val titleCase = words.size in 1..6 && words.all { w -> w.first().isUpperCase() || !w.first().isLetter() || w.length <= 3 }
+        return titleCase && prevEmpty && nextEmpty && !endsLikeSentence && line.length <= 50 &&
+            words.first().first().isUpperCase()
+    }
+
+    private fun isTableRow(line: String): Boolean =
+        (line.startsWith("|") && line.endsWith("|") && line.length > 2) || line.count { it == '\t' } >= 2
+
+    private fun joinLines(lines: List<String>): String {
+        if (lines.size == 1) return lines[0]
+        val sb = StringBuilder(lines[0])
+        for (idx in 1 until lines.size) {
+            val prev = lines[idx - 1]
+            val curr = lines[idx]
+            when {
+                prev.endsWith("-") && curr.firstOrNull()?.isLowerCase() == true -> {
+                    sb.setLength(sb.length - 1); sb.append(curr)
+                }
+                // Hard-wrapped prose: previous line does not end a sentence, or is a long full-width line.
+                (!prev.endsWithAny(".", ":", ";", "!", "?") && curr.firstOrNull()?.isLowerCase() == true) ||
+                    (prev.length > 45 && !prev.endsWith(":")) -> sb.append(' ').append(curr)
+                else -> sb.append('\n').append(curr)
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun continuesSentence(prev: String, next: String): Boolean {
+        val p = prev.trimEnd()
+        val n = next.trimStart()
+        if (p.isEmpty() || n.isEmpty()) return false
+        if (p.endsWith("-") && n[0].isLowerCase()) return true
+        return !p.endsWithAny(".", "?", "!", ":", ";", "|") && n[0].isLowerCase()
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 2. Units (token-measured)
+    // ---------------------------------------------------------------------------------------------
+
+    private fun toUnits(blocks: List<Block>, count: (String) -> Int, maxTokens: Int): List<Unit> {
+        val units = mutableListOf<Unit>()
+        blocks.forEachIndexed { id, block ->
+            val tokens = count(block.text)
+            if (tokens <= maxTokens) {
+                units.add(Unit(block.text, tokens, block.startPage, block.endPage, block.sectionTitle, block.type, id))
+                return@forEachIndexed
+            }
+            val pieces = if (block.type == BlockType.TABLE_ROW || block.type == BlockType.LIST_ITEM) {
+                block.text.lines().filter { it.isNotBlank() }
+            } else {
+                splitIntoSentences(block.text)
+            }
+            for (piece in pieces) {
+                val pieceTokens = count(piece)
+                if (pieceTokens <= maxTokens) {
+                    units.add(Unit(piece, pieceTokens, block.startPage, block.endPage, block.sectionTitle, block.type, id))
+                } else {
+                    for (window in splitByWords(piece, count, maxTokens)) {
+                        units.add(Unit(window, count(window), block.startPage, block.endPage, block.sectionTitle, block.type, id))
                     }
-                    mergedBlocks.add(
-                        SemanticBlock(
-                            startPage = current.startPage,
-                            endPage = next.endPage,
-                            sectionTitle = current.sectionTitle ?: next.sectionTitle,
-                            blockType = BlockType.PARAGRAPH,
-                            text = combinedText,
-                            followedByEmptyLine = next.followedByEmptyLine
-                        )
-                    )
-                    bIdx += 2
-                    continue
                 }
             }
-            mergedBlocks.add(current)
-            bIdx++
         }
+        return units
+    }
 
-        // 3. Assemble Semantic Blocks into Structure-Preserving Retrieval Chunks
+    private fun splitByWords(text: String, count: (String) -> Int, maxTokens: Int): List<String> {
+        val words = text.split(WHITESPACE).filter { it.isNotEmpty() }
+        val windows = mutableListOf<String>()
+        val current = mutableListOf<String>()
+        // WordPiece splits on whitespace first, so a window's token count is the sum of its words' counts:
+        // count each word once instead of re-tokenizing the growing window (which was quadratic).
+        var running = 0
+        for (word in words) {
+            val t = count(word)
+            if (current.isNotEmpty() && running + t > maxTokens) {
+                windows.add(current.joinToString(" "))
+                current.clear()
+                running = 0
+            }
+            current.add(word)
+            running += t
+        }
+        if (current.isNotEmpty()) windows.add(current.joinToString(" "))
+        return windows
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 3. Packing with overlap
+    // ---------------------------------------------------------------------------------------------
+
+    private fun pack(
+        units: List<Unit>,
+        count: (String) -> Int,
+        targetTokens: Int,
+        maxTokens: Int,
+        overlapTokens: Int
+    ): List<Chunk> {
         val chunks = mutableListOf<Chunk>()
-        var currentChunkBlocks = mutableListOf<SemanticBlock>()
-        var currentWordCount = 0
-        var globalChunkIndex = 0
+        var overlap: List<String> = emptyList()       // carried sentences from the previous chunk
+        var overlapPage = 0                            // page those sentences were printed on
+        val current = mutableListOf<Unit>()            // new content of the chunk being built
+        var currentTokens = 0
         var paragraphIndex = 0
 
-        fun emitChunk(blocks: List<SemanticBlock>) {
-            if (blocks.isEmpty()) return
-
-            val firstBlock = blocks.first()
-            val lastBlock = blocks.last()
-            val startPage = firstBlock.startPage
-            val endPage = lastBlock.endPage
-            val pageSpan = if (startPage == endPage) "$startPage" else "$startPage-$endPage"
-            val section = blocks.mapNotNull { it.sectionTitle }.firstOrNull()
-
-            // Format chunk text preserving block types and line breaks
-            val textBuilder = StringBuilder()
-            for (j in blocks.indices) {
-                val b = blocks[j]
-                if (j > 0) {
-                    val prev = blocks[j - 1]
-                    if (prev.followedByEmptyLine) {
-                        textBuilder.append("\n\n")
-                    } else {
-                        textBuilder.append("\n")
-                    }
-                }
-                textBuilder.append(b.text)
-            }
-
-            val chunkText = textBuilder.toString().trim()
-            if (chunkText.isNotEmpty()) {
-                chunks.add(
-                    Chunk(
-                        index = globalChunkIndex++,
-                        pageNumber = startPage,
-                        text = chunkText,
-                        pageSpan = pageSpan,
-                        sectionTitle = section,
-                        paragraphIndex = paragraphIndex
+        fun render(): String {
+            val sb = StringBuilder()
+            if (overlap.isNotEmpty()) sb.append(overlap.joinToString(" "))
+            for ((i, u) in current.withIndex()) {
+                if (sb.isNotEmpty()) {
+                    val prev = current.getOrNull(i - 1)
+                    val sameBlock = prev != null && prev.blockId == u.blockId
+                    sb.append(
+                        when {
+                            sameBlock && u.type == BlockType.PARAGRAPH -> " "
+                            sameBlock -> "\n"
+                            else -> "\n\n"
+                        }
                     )
+                }
+                sb.append(u.text)
+            }
+            return sb.toString().trim()
+        }
+
+        fun emit(carryOverlap: Boolean) {
+            if (current.isEmpty()) return
+            val text = render()
+            val first = current.first()
+            // Carried-over sentences come from the previous chunk's last page; include it in the span.
+            val startPage = if (overlap.isNotEmpty()) minOf(overlapPage, first.startPage) else first.startPage
+            val endPage = current.maxOf { it.endPage }
+            val section = current.firstNotNullOfOrNull { it.sectionTitle }
+            chunks.add(
+                Chunk(
+                    index = chunks.size,
+                    pageNumber = startPage,
+                    text = text,
+                    pageSpan = if (startPage == endPage) "$startPage" else "$startPage-$endPage",
+                    sectionTitle = section,
+                    paragraphIndex = paragraphIndex,
+                    tokenCount = count(text)
                 )
-                paragraphIndex += blocks.count { it.blockType == BlockType.PARAGRAPH }
-            }
+            )
+            paragraphIndex += current.map { it.blockId }.distinct().size
+            val last = current.last()
+            overlapPage = last.endPage
+            overlap = if (carryOverlap && overlapTokens > 0 && last.type != BlockType.HEADING && last.type != BlockType.TABLE_ROW) {
+                trailingSentences(current, count, overlapTokens)
+            } else emptyList()
+            current.clear()
+            currentTokens = overlap.sumOf { count(it) }
         }
 
-        for (block in mergedBlocks) {
-            val blockWords = countWords(block.text)
-
-            // If a single block is huge, split at sentence boundaries
-            if (blockWords > maxWords) {
-                if (currentChunkBlocks.isNotEmpty()) {
-                    emitChunk(currentChunkBlocks)
-                    currentChunkBlocks = mutableListOf()
-                    currentWordCount = 0
-                }
-
-                val sentenceSplits = splitIntoSentences(block.text)
-                var sentAcc = mutableListOf<String>()
-                var sentWords = 0
-
-                for (sent in sentenceSplits) {
-                    val sw = countWords(sent)
-                    if (sentWords + sw > maxWords && sentAcc.isNotEmpty()) {
-                        val splitBlock = block.copy(text = sentAcc.joinToString(" "))
-                        emitChunk(listOf(splitBlock))
-                        sentAcc = mutableListOf()
-                        sentWords = 0
-                    }
-                    sentAcc.add(sent)
-                    sentWords += sw
-                }
-                if (sentAcc.isNotEmpty()) {
-                    val splitBlock = block.copy(text = sentAcc.joinToString(" "))
-                    currentChunkBlocks.add(splitBlock)
-                    currentWordCount = sentWords
-                }
-                continue
+        for (unit in units) {
+            if (unit.type == BlockType.HEADING && current.any { it.type != BlockType.HEADING }) {
+                emit(carryOverlap = false) // a new section never inherits the previous section's tail
+                overlap = emptyList(); currentTokens = 0
             }
+            val sectionChanged = current.isEmpty() && overlap.isNotEmpty() &&
+                unit.sectionTitle != null && chunks.lastOrNull()?.sectionTitle != unit.sectionTitle
+            if (sectionChanged) { overlap = emptyList(); currentTokens = 0 }
 
-            if (currentWordCount + blockWords > targetWords && currentChunkBlocks.isNotEmpty()) {
-                emitChunk(currentChunkBlocks)
-
-                // Overlap: keep the last block if it provides useful context within budget
-                val lastBlock = currentChunkBlocks.lastOrNull()
-                currentChunkBlocks = mutableListOf()
-                currentWordCount = 0
-
-                if (lastBlock != null && countWords(lastBlock.text) <= overlapWords && lastBlock.blockType != BlockType.HEADING) {
-                    currentChunkBlocks.add(lastBlock)
-                    currentWordCount = countWords(lastBlock.text)
-                }
+            val separatorCost = if (current.isEmpty() && overlap.isEmpty()) 0 else 1
+            val hasContent = current.any { it.type != BlockType.HEADING }
+            if (hasContent && currentTokens + separatorCost + unit.tokens > targetTokens) {
+                emit(carryOverlap = true)
+            } else if (!hasContent && current.isNotEmpty() && currentTokens + separatorCost + unit.tokens > maxTokens) {
+                emit(carryOverlap = false) // rare: heading(s) too long to share a chunk with the next unit
             }
-
-            currentChunkBlocks.add(block)
-            currentWordCount += blockWords
+            if (currentTokens + unit.tokens > maxTokens) {
+                overlap = emptyList(); currentTokens = 0 // overlap never pushes a chunk past the hard limit
+            }
+            current.add(unit)
+            currentTokens += unit.tokens + if (currentTokens > 0) 1 else 0
         }
-
-        if (currentChunkBlocks.isNotEmpty()) {
-            emitChunk(currentChunkBlocks)
-        }
-
+        emit(carryOverlap = false)
         return chunks
     }
 
-    /**
-     * Backward-compatible API for single-page chunking.
-     * Preserves structure, line breaks, and lists instead of flat-collapsing whitespace.
-     */
-    fun chunkText(
-        text: String,
-        pageNumber: Int,
-        chunkSize: Int = 400,
-        overlap: Int = 80
-    ): List<Chunk> {
-        val extractedPage = ExtractedPage(pageNumber = pageNumber, text = text)
-        return chunkDocument(
-            pages = listOf(extractedPage),
-            targetWords = chunkSize,
-            maxWords = (chunkSize * 1.25).toInt(),
-            overlapWords = overlap
-        )
+    private fun trailingSentences(units: List<Unit>, count: (String) -> Int, budget: Int): List<String> {
+        val tail = units.last { it.type != BlockType.HEADING }
+        val sentences = splitIntoSentences(tail.text)
+        val picked = ArrayDeque<String>()
+        var used = 0
+        for (sentence in sentences.asReversed()) {
+            val t = count(sentence)
+            if (used + t > budget || picked.size >= 2) break
+            picked.addFirst(sentence)
+            used += t
+        }
+        return picked.toList()
     }
 
-    private fun detectHeading(line: String, prevLineEmpty: Boolean, nextLineEmpty: Boolean): String? {
-        val trimmed = line.trim()
-        if (trimmed.isEmpty() || trimmed.length > 90) return null
-
-        // 1. Markdown heading: "# Section", "## Section"
-        if (trimmed.startsWith("#")) {
-            return trimmed.replace(Regex("^#+\\s*"), "").trim()
-        }
-
-        // 2. Numbered outline / Chapter / Section
-        val outlineMatch = Regex(
-            """^(?:(?:chapter|section|appendix|part)\s+[0-9a-zA-Z\.]+|[0-9]+(?:\.[0-9]+)+|[A-Z]\.[0-9]+)\s*[:\-]?\s*(.*)$""",
-            RegexOption.IGNORE_CASE
-        ).find(trimmed)
-        if (outlineMatch != null) {
-            val titlePart = outlineMatch.groupValues[1].trim()
-            return if (titlePart.isNotEmpty()) trimmed else outlineMatch.value.trim()
-        }
-
-        // 3. Category label ending with colon: "Languages:", "Projects:", "Requirements:"
-        val colonMatch = Regex("""^([A-Za-z0-9\s/&_\-]{3,50}):$""").find(trimmed)
-        if (colonMatch != null) {
-            return colonMatch.groupValues[1].trim()
-        }
-
-        // 4. Isolated short uppercase line (e.g. TECHNICAL SKILLS, EDUCATION)
-        val isAllUpper = trimmed.length in 3..60 && trimmed.all { it.isUpperCase() || !it.isLetter() } && trimmed.any { it.isLetter() }
-        val endsWithPunctuation = trimmed.endsWith(".") || trimmed.endsWith(",") || trimmed.endsWith(";")
-        if (isAllUpper && !endsWithPunctuation && (prevLineEmpty || trimmed.length <= 40)) {
-            return trimmed
-        }
-
-        // 5. Short title-case phrase isolated by newlines
-        val words = trimmed.split(Regex("\\s+"))
-        val isTitleCase = words.size in 1..6 && words.all { it.isNotEmpty() && (it[0].isUpperCase() || it.all { c -> !c.isLetter() }) }
-        if (isTitleCase && prevLineEmpty && !endsWithPunctuation && trimmed.length <= 45) {
-            return trimmed
-        }
-
-        return null
-    }
-
-    private fun isTableRow(line: String): Boolean {
-        return (line.startsWith("|") && line.endsWith("|")) ||
-            (line.contains("|") && line.count { it == '|' } >= 2) ||
-            (line.contains("\t") && line.count { it == '\t' } >= 2)
-    }
-
-    private fun isListItem(line: String): Boolean {
-        val trimmed = line.trim()
-        return Regex("""^(?:[•\-\*‣◦⁃∙]|\d+[\.\)]|[a-zA-Z][\.\)]|\([0-9a-zA-Z]\))\s+""").containsMatchIn(trimmed)
-    }
-
-    private fun joinParagraphLines(lines: List<String>): String {
-        if (lines.isEmpty()) return ""
-        if (lines.size == 1) return lines[0].trim()
-
-        val sb = StringBuilder()
-        for (idx in lines.indices) {
-            val line = lines[idx]
-            if (idx > 0) {
-                val prevLine = lines[idx - 1].trim()
-                val currLine = line.trim()
-
-                // 1. Soft-hyphen wrap: previous line ends with hyphen, current starts with lowercase
-                if (prevLine.endsWith("-") && currLine.isNotEmpty() && currLine[0].isLowerCase()) {
-                    sb.setLength(sb.length - 1)
-                    sb.append(currLine)
-                    continue
-                }
-
-                // 2. Prose sentence continuation:
-                // Previous line does not end with colon/terminal punctuation AND current starts with lowercase
-                // OR previous line is long full-width line (> 45 chars) in running paragraph
-                val isProseContinuation = (!prevLine.endsWith(".") && !prevLine.endsWith(":") &&
-                    !prevLine.endsWith(";") && !prevLine.endsWith("!") && !prevLine.endsWith("?") &&
-                    currLine.isNotEmpty() && currLine[0].isLowerCase()) ||
-                    (prevLine.length > 45 && !prevLine.endsWith(":") && !prevLine.endsWith("|"))
-
-                if (isProseContinuation) {
-                    sb.append(" ").append(currLine)
-                } else {
-                    // Short line, list element, item, or key-value line -> PRESERVE NEWLINE
-                    sb.append("\n").append(currLine)
-                }
-            } else {
-                sb.append(line.trim())
-            }
-        }
-        return sb.toString().trim()
-    }
-
-    private fun isSentenceContinuation(prevText: String, nextText: String): Boolean {
-        val pTrim = prevText.trim()
-        val nTrim = nextText.trim()
-        if (pTrim.isEmpty() || nTrim.isEmpty()) return false
-
-        // Dangle hyphen word continuation (e.g. "configu-", "ration")
-        if (pTrim.endsWith("-") && nTrim[0].isLowerCase()) return true
-
-        // Previous text does not end with terminal punctuation
-        val endsWithTerminal = pTrim.endsWith(".") || pTrim.endsWith("?") || pTrim.endsWith("!") ||
-            pTrim.endsWith(":") || pTrim.endsWith("|") || pTrim.endsWith(";")
-
-        return !endsWithTerminal && nTrim[0].isLowerCase()
-    }
+    // ---------------------------------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------------------------------
 
     fun splitIntoSentences(text: String): List<String> {
         val clean = text.trim()
         if (clean.isEmpty()) return emptyList()
-
-        val iterator = java.text.BreakIterator.getSentenceInstance(java.util.Locale.US)
+        val iterator = BreakIterator.getSentenceInstance(Locale.US)
         iterator.setText(clean)
-
-        val rawSentences = mutableListOf<String>()
+        val raw = mutableListOf<String>()
         var start = iterator.first()
         var end = iterator.next()
-
-        while (end != java.text.BreakIterator.DONE) {
-            val sentence = clean.substring(start, end).trim()
-            if (sentence.isNotEmpty()) {
-                rawSentences.add(sentence)
-            }
+        while (end != BreakIterator.DONE) {
+            clean.substring(start, end).trim().takeIf { it.isNotEmpty() }?.let { raw.add(it) }
             start = end
             end = iterator.next()
         }
-
-        val abbreviations = setOf("dr.", "mr.", "mrs.", "ms.", "prof.", "sr.", "jr.", "e.g.", "i.e.", "vs.", "etc.")
+        // Re-join splits that happened after common abbreviations ("e.g. the", "Dr. Smith").
         val merged = mutableListOf<String>()
-        var i = 0
-        while (i < rawSentences.size) {
-            var current = rawSentences[i]
-            while (i + 1 < rawSentences.size) {
-                val lastToken = current.split(Regex("\\s+")).lastOrNull()?.lowercase()?.trimEnd('.', ',') + "."
-                if (abbreviations.contains(lastToken)) {
-                    i++
-                    current = "$current ${rawSentences[i]}"
-                } else {
-                    break
-                }
+        for (sentence in raw) {
+            val prev = merged.lastOrNull()
+            val lastToken = prev?.substringAfterLast(' ')?.lowercase()
+            if (prev != null && lastToken != null && lastToken in ABBREVIATIONS) {
+                merged[merged.size - 1] = "$prev $sentence"
+            } else {
+                merged.add(sentence)
             }
-            merged.add(current)
-            i++
         }
-
-        return if (merged.isNotEmpty()) merged else listOf(clean)
+        return merged.ifEmpty { listOf(clean) }
     }
 
-    private fun countWords(text: String): Int {
-        return text.split(Regex("""\s+""")).count { it.isNotEmpty() }
-    }
+    private val ABBREVIATIONS = setOf(
+        "dr.", "mr.", "mrs.", "ms.", "prof.", "sr.", "jr.", "e.g.", "i.e.", "vs.", "etc.", "fig.", "no.", "approx."
+    )
+
+    private fun String.endsWithAny(vararg suffixes: String) = suffixes.any { endsWith(it) }
 }

@@ -7,10 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Lifecycle states for the native llama.cpp runner.
- */
 enum class LlamaState {
     UNINITIALIZED,
     LOADING,
@@ -20,272 +18,217 @@ enum class LlamaState {
     UNLOADED
 }
 
+/** A chat turn handed to the model's chat template. */
+data class ChatMessage(val role: String, val content: String)
+
 /**
- * Thread-safe native JNI runner for llama.cpp on Android.
- *
- * Manages model lifecycle:
- * - Safe native library loading (System.loadLibrary("llama_jni"))
- * - Model instantiation and context management via nativeInit
- * - In-memory model caching across queries to prevent repeated loading overhead
- * - Native token generation via nativeInference
- * - Idempotent resource cleanup via nativeFree
- * - Clear state transitions: UNINITIALIZED -> LOADING -> READY -> GENERATING -> UNLOADED / ERROR
+ * Cancellation handle for one generation request. Cancelling a token only ever stops *its own*
+ * request: a token cancelled before its inference starts makes that inference return immediately,
+ * and a token never stops another request that happens to be running.
  */
-class LlamaRunner(private val context: Context) {
+class GenerationToken {
+    private val cancelled = AtomicBoolean(false)
+    val isCancelled: Boolean get() = cancelled.get()
+    internal var onCancel: (() -> Unit)? = null
+
+    fun cancel() {
+        if (cancelled.compareAndSet(false, true)) onCancel?.invoke()
+    }
+}
+
+/**
+ * Thin, thread-safe wrapper over the llama.cpp JNI bridge ([LlamaNative]). All strings cross JNI as UTF-8 bytes.
+ */
+class LlamaRunner(context: Context) {
 
     private val TAG = "LlamaRunner"
 
-    var isNativeLoaded: Boolean = false
-        private set
+    val isNativeLoaded: Boolean = LlamaNative.ensureInitialized(context)
 
-    private var modelContextPointer: Long = 0L
-    private var loadedModelPath: String? = null
+    @Volatile private var handle: Long = 0L
+    @Volatile private var loadedModelPath: String? = null
+    private var requestedContextSize: Int = 0
+    /** Guards [handle] against being freed while a cancel is being delivered to it. */
+    private val handleLock = Any()
+    @Volatile private var activeToken: GenerationToken? = null
+    /** First generation after a load exercises the CPU kernels; keep the crash sentinel armed for it. */
+    @Volatile private var firstGenerationPending = false
 
-    private val _runnerState = MutableStateFlow(LlamaState.UNINITIALIZED)
+    private val _runnerState = MutableStateFlow(if (isNativeLoaded) LlamaState.UNINITIALIZED else LlamaState.ERROR)
     val runnerState: StateFlow<LlamaState> = _runnerState.asStateFlow()
 
-    val currentState: LlamaState
-        get() = _runnerState.value
+    val currentState: LlamaState get() = _runnerState.value
+    val isGenerating: Boolean get() = _runnerState.value == LlamaState.GENERATING
 
-    val isGenerating: Boolean
-        get() = _runnerState.value == LlamaState.GENERATING
-
-    private var lastErrorMessage: String? = null
+    @Volatile private var lastErrorMessage: String? =
+        if (isNativeLoaded) null else "Unable to initialize the local LLM: ${LlamaNative.loadError ?: "native library not loaded."}"
     fun getLastErrorMessage(): String? = lastErrorMessage
 
-    init {
-        try {
-            System.loadLibrary("llama_jni")
-            isNativeLoaded = true
-            _runnerState.value = LlamaState.UNINITIALIZED
-            Log.i(TAG, "Native llama_jni library loaded successfully.")
-        } catch (e: UnsatisfiedLinkError) {
-            isNativeLoaded = false
-            _runnerState.value = LlamaState.ERROR
-            lastErrorMessage = "Native library not available on platform: ${e.message}"
-            Log.w(TAG, "Native llama_jni library not available on this platform: ${e.message}")
-        } catch (e: Exception) {
-            isNativeLoaded = false
-            _runnerState.value = LlamaState.ERROR
-            lastErrorMessage = "Unexpected error loading llama_jni: ${e.message}"
-            Log.e(TAG, "Unexpected error loading llama_jni: ${e.message}", e)
-        }
-    }
+    /** Context window actually allocated for the loaded model (0 when nothing is loaded). */
+    @Volatile var contextSize: Int = 0
+        private set
 
-    /**
-     * Checks if a model is currently loaded in memory and ready for inference.
-     */
     @Synchronized
-    fun isModelLoaded(): Boolean {
-        return isNativeLoaded && modelContextPointer != 0L && _runnerState.value == LlamaState.READY
-    }
+    fun isModelLoaded(): Boolean = isNativeLoaded && handle != 0L
 
-    /**
-     * Gets the file path of the currently loaded model, if any.
-     */
-    @Synchronized
     fun getLoadedModelPath(): String? = loadedModelPath
 
-    /**
-     * Loads a GGUF model from a filesystem path into llama.cpp.
-     * Reuses the existing model context if the same model file is already loaded.
-     */
+    /** Loads (or reuses) a GGUF model. Blocking; call from a background dispatcher. */
     @Synchronized
-    fun loadModel(
-        modelPath: String,
-        contextSize: Int = 2048,
-        threadCount: Int = 4
-    ): Boolean {
+    fun loadModel(modelPath: String, contextSize: Int = 4096, threadCount: Int = 4): Boolean {
         if (!isNativeLoaded) {
-            lastErrorMessage = "Native llama_jni library is not loaded."
-            _runnerState.value = LlamaState.ERROR
-            Log.w(TAG, "Cannot load model: native llama_jni library is not loaded.")
+            lastErrorMessage = lastErrorMessage ?: "Unable to initialize the local LLM: native library not loaded."
             return false
         }
-
-        if (modelPath.isBlank()) {
-            lastErrorMessage = "modelPath is empty."
-            _runnerState.value = LlamaState.ERROR
-            Log.e(TAG, "Cannot load model: modelPath is empty.")
-            return false
-        }
-
         val file = File(modelPath)
-        if (!file.exists()) {
-            lastErrorMessage = "Model file does not exist at $modelPath"
+        val headerError = validateGguf(file)
+        if (headerError != null) {
+            lastErrorMessage = headerError
             _runnerState.value = LlamaState.ERROR
-            Log.e(TAG, "Cannot load model: file does not exist at $modelPath")
             return false
         }
-        if (!file.canRead()) {
-            lastErrorMessage = "Model file exists but cannot be read at $modelPath"
-            _runnerState.value = LlamaState.ERROR
-            Log.e(TAG, "Cannot load model: file cannot be read at $modelPath")
-            return false
-        }
-        if (file.length() < 1024) {
-            lastErrorMessage = "Model file is invalid or empty (< 1024 bytes) at $modelPath"
-            _runnerState.value = LlamaState.ERROR
-            Log.e(TAG, "Cannot load model: file size too small at $modelPath")
-            return false
-        }
-
-        // Validate GGUF Magic Header
-        try {
-            file.inputStream().use { input ->
-                val magic = ByteArray(4)
-                val read = input.read(magic)
-                if (read < 4 || String(magic) != "GGUF") {
-                    lastErrorMessage = "The selected file is not a valid or supported GGUF model."
-                    _runnerState.value = LlamaState.ERROR
-                    Log.e(TAG, "Invalid GGUF file header at $modelPath! Header: ${String(magic)}")
-                    return false
-                }
-            }
-        } catch (e: Exception) {
-            lastErrorMessage = "Failed reading GGUF header from $modelPath: ${e.message}"
-            _runnerState.value = LlamaState.ERROR
-            Log.e(TAG, "Failed reading GGUF header from $modelPath: ${e.message}")
-            return false
-        }
-
-        // Reuse model context if already loaded for this path
-        if (loadedModelPath == modelPath && modelContextPointer != 0L && _runnerState.value == LlamaState.READY) {
-            Log.d(TAG, "Model already loaded from $modelPath. Reusing context.")
+        if (loadedModelPath == modelPath && handle != 0L && requestedContextSize == contextSize) {
             return true
         }
-
-        // Free previous model context if path differs
         freeModel()
-
         _runnerState.value = LlamaState.LOADING
-
-        Log.i("MODEL_VERIFICATION", "==================================================")
-        Log.i("MODEL_VERIFICATION", "MODEL_PATH=${file.absolutePath}")
-        Log.i("MODEL_VERIFICATION", "MODEL_FILENAME=${file.name}")
-        Log.i("MODEL_VERIFICATION", "MODEL_FILE_SIZE=${file.length()}")
-        Log.i("MODEL_VERIFICATION", "GGUF_MAGIC_VERIFIED=true")
-        Log.i("MODEL_VERIFICATION", "==================================================")
-
         return try {
             val cores = Runtime.getRuntime().availableProcessors()
-            val effectiveThreads = if (threadCount in 1..cores) threadCount else maxOf(1, minOf(cores, 4))
-            val startTime = System.currentTimeMillis()
-
-            val ptr = nativeInit(modelPath, contextSize, effectiveThreads)
-            if (ptr != 0L) {
-                modelContextPointer = ptr
-                loadedModelPath = modelPath
-                _runnerState.value = LlamaState.READY
-                lastErrorMessage = null
-                val elapsed = System.currentTimeMillis() - startTime
-                Log.i(TAG, "GGUF model initialized successfully in $elapsed ms from: $modelPath (threads=$effectiveThreads, ctx=$contextSize)")
-                true
-            } else {
-                lastErrorMessage = "Unable to initialize the local LLM. Check the model and device compatibility."
+            val threads = threadCount.coerceIn(1, maxOf(1, cores))
+            val startedAt = SystemClock.elapsedRealtime()
+            val ptr = LlamaNative.guarded { LlamaNative.nativeInit(modelPath.toByteArray(Charsets.UTF_8), contextSize, threads) }
+            if (ptr == 0L) {
+                lastErrorMessage = "Unable to load this model. The file may be damaged or the device may not have enough free memory."
                 _runnerState.value = LlamaState.ERROR
-                Log.e(TAG, "nativeInit returned 0 (null context) for model: $modelPath")
                 false
+            } else {
+                synchronized(handleLock) { handle = ptr }
+                loadedModelPath = modelPath
+                requestedContextSize = contextSize
+                this.contextSize = LlamaNative.nativeGetContextSize(ptr)
+                firstGenerationPending = true
+                lastErrorMessage = null
+                _runnerState.value = LlamaState.READY
+                Log.i(TAG, "Loaded ${file.name} in ${SystemClock.elapsedRealtime() - startedAt} ms (n_ctx=${this.contextSize}, threads=$threads, cpu=${LlamaNative.cpuVariant})")
+                true
             }
         } catch (oom: OutOfMemoryError) {
             lastErrorMessage = "Unable to load the model because the device does not have enough available memory."
             _runnerState.value = LlamaState.ERROR
-            Log.e(TAG, "OOM during nativeInit: ${oom.message}", oom)
-            freeModel()
             false
         } catch (e: Throwable) {
-            val msg = e.message ?: "Unknown native error"
-            lastErrorMessage = if (msg.contains("memory", ignoreCase = true) || msg.contains("alloc", ignoreCase = true)) {
-                "Unable to load the model because the device does not have enough available memory."
-            } else {
-                "Unable to initialize the local LLM. Check the model and device compatibility."
-            }
+            lastErrorMessage = "Unable to initialize the local LLM. Check the model and device compatibility."
             _runnerState.value = LlamaState.ERROR
-            Log.e(TAG, "Exception during nativeInit: ${e.message}", e)
-            freeModel()
+            Log.e(TAG, "nativeInit failed: ${e.message}", e)
             false
         }
     }
 
+    /** Number of model tokens in [text]. [isPrompt] counts a fully formatted prompt (BOS + control tokens). */
+    @Synchronized
+    fun countTokens(text: String, isPrompt: Boolean = false): Int? {
+        if (handle == 0L) return null
+        return LlamaNative.nativeCountTokens(handle, text.toByteArray(Charsets.UTF_8), isPrompt).takeIf { it >= 0 }
+    }
+
+    /** GGUF metadata value, e.g. "general.architecture" or "tokenizer.chat_template". */
+    @Synchronized
+    fun metadata(key: String): String? {
+        if (handle == 0L) return null
+        return LlamaNative.nativeGetMetadata(handle, key)?.toString(Charsets.UTF_8)
+    }
+
+    /** Applies the model's own chat template; null when the model has none that llama.cpp recognises. */
+    @Synchronized
+    fun applyChatTemplate(messages: List<ChatMessage>, addAssistantTurn: Boolean = true): String? {
+        if (handle == 0L) return null
+        val roles = messages.map { it.role }.toTypedArray()
+        val contents = messages.map { it.content.toByteArray(Charsets.UTF_8) }.toTypedArray()
+        return LlamaNative.nativeApplyChatTemplate(handle, roles, contents, addAssistantTurn)?.toString(Charsets.UTF_8)
+    }
+
     /**
-     * Executes neural inference on the loaded model.
-     * Returns the raw generated string, or throws an IllegalStateException on failure.
+     * Runs generation for a fully formatted prompt. Blocking; throws IllegalStateException on failure.
+     * Returns whatever was generated before [token] was cancelled (possibly empty).
      */
     @Synchronized
     fun inference(
         prompt: String,
-        maxTokens: Int = 384,
-        temperature: Float = 0.1f
+        maxTokens: Int,
+        temperature: Float = 0.2f,
+        topP: Float = 0.9f,
+        repeatPenalty: Float = 1.1f,
+        token: GenerationToken = GenerationToken(),
+        seed: Int = 42,
+        onPartial: ((String) -> Unit)? = null
     ): String {
-        if (!isNativeLoaded) {
-            throw IllegalStateException("Native llama_jni library is not loaded.")
-        }
-        if (modelContextPointer == 0L) {
-            throw IllegalStateException("No GGUF model is loaded. Call loadModel() first.")
-        }
-        if (prompt.isBlank()) {
-            return ""
-        }
-
-        val inferenceStartedAt = SystemClock.elapsedRealtime()
+        check(isNativeLoaded) { "Native llama_jni library is not loaded." }
+        check(handle != 0L) { "No GGUF model is loaded." }
+        if (prompt.isBlank() || token.isCancelled) return ""
+        val ptr = handle
+        val startedAt = SystemClock.elapsedRealtime()
         _runnerState.value = LlamaState.GENERATING
-        return try {
-            val result = nativeInference(modelContextPointer, prompt, maxTokens, temperature)
-            if (result.startsWith("Error:")) {
-                Log.e(TAG, "nativeInference error: $result")
-                _runnerState.value = LlamaState.ERROR
-                lastErrorMessage = "Local generation failed. The model remains installed, but the current generation could not be completed."
-                throw IllegalStateException("Local generation failed: $result")
+        // Take ownership of the native cancel flag for this request, then re-check: a cancel that
+        // raced with the registration is delivered instead of being lost.
+        LlamaNative.nativeResetCancel(ptr)
+        activeToken = token
+        token.onCancel = { cancelNative(token) }
+        if (token.isCancelled) LlamaNative.nativeCancel(ptr)
+        try {
+            val listener = onPartial?.let { cb -> NativeTextListener { bytes -> cb(bytes.toString(Charsets.UTF_8)) } }
+            val run = {
+                LlamaNative.nativeInference(ptr, prompt.toByteArray(Charsets.UTF_8), maxTokens, temperature, topP, repeatPenalty, seed, listener)
             }
-            _runnerState.value = LlamaState.READY
-            Log.i(
-                "CHAT_LATENCY",
-                "gguf_native_inference_ms=${SystemClock.elapsedRealtime() - inferenceStartedAt} prompt_chars=${prompt.length} output_chars=${result.length} max_tokens=$maxTokens"
-            )
-            result
+            val bytes = if (firstGenerationPending) LlamaNative.guarded(run).also { firstGenerationPending = false } else run()
+            Log.i(TAG, "Inference finished in ${SystemClock.elapsedRealtime() - startedAt} ms")
+            return bytes.toString(Charsets.UTF_8)
         } catch (e: Throwable) {
-            Log.e(TAG, "Exception during nativeInference: ${e.message}", e)
-            _runnerState.value = if (modelContextPointer != 0L) LlamaState.READY else LlamaState.ERROR
             lastErrorMessage = "Local generation failed. The model remains installed, but the current generation could not be completed."
-            throw e
+            throw IllegalStateException("Local generation failed: ${e.message}", e)
+        } finally {
+            token.onCancel = null
+            activeToken = null
+            _runnerState.value = if (handle != 0L) LlamaState.READY else LlamaState.ERROR
         }
     }
 
-    /**
-     * Frees the native model context and releases all llama.cpp memory.
-     * Safe to call multiple times (idempotent).
-     */
     @Synchronized
     fun freeModel() {
-        val ptr = modelContextPointer
-        if (ptr != 0L) {
-            try {
-                nativeFree(ptr)
-                Log.i(TAG, "Native model context ($ptr) freed successfully.")
-            } catch (e: Throwable) {
-                Log.e(TAG, "Error freeing native model context: ${e.message}", e)
-            } finally {
-                modelContextPointer = 0L
-                loadedModelPath = null
-                _runnerState.value = LlamaState.UNLOADED
-            }
-        } else {
-            _runnerState.value = LlamaState.UNLOADED
+        val ptr: Long
+        synchronized(handleLock) {
+            ptr = handle
+            handle = 0L
+        }
+        loadedModelPath = null
+        contextSize = 0
+        requestedContextSize = 0
+        if (ptr != 0L) runCatching { LlamaNative.nativeFree(ptr) }.onFailure { Log.e(TAG, "nativeFree failed", it) }
+        _runnerState.value = LlamaState.UNLOADED
+    }
+
+    /** Stops the generation that is currently running, whichever request it belongs to. */
+    fun cancelInference() {
+        activeToken?.cancel() ?: synchronized(handleLock) {
+            if (isNativeLoaded && handle != 0L) LlamaNative.nativeCancel(handle)
         }
     }
 
-    // JNI Native methods matching llama_jni.cpp
-    private external fun nativeInit(modelPath: String, contextSize: Int, threadCount: Int): Long
-    private external fun nativeFree(modelContext: Long)
-    private external fun nativeInference(modelContext: Long, prompt: String, maxTokens: Int, temperature: Float): String
-    private external fun nativeCancel()
+    private fun cancelNative(token: GenerationToken) {
+        synchronized(handleLock) {
+            if (activeToken === token && handle != 0L) LlamaNative.nativeCancel(handle)
+        }
+    }
 
-    fun cancelInference() {
-        if (isNativeLoaded) {
-            nativeCancel()
-            if (_runnerState.value == LlamaState.GENERATING) {
-                _runnerState.value = LlamaState.READY
-            }
+    private fun validateGguf(file: File): String? {
+        if (!file.exists()) return "Model file not found at ${file.absolutePath}"
+        if (!file.canRead()) return "Installed model cannot be read. Re-import the model."
+        if (file.length() < 1024) return "The selected file is not a valid or supported GGUF model."
+        return try {
+            val magic = ByteArray(4)
+            file.inputStream().use { if (it.read(magic) < 4) return "The selected file is not a valid or supported GGUF model." }
+            if (String(magic, Charsets.US_ASCII) != "GGUF") "The selected file is not a valid or supported GGUF model." else null
+        } catch (e: Exception) {
+            "Installed model cannot be read. Re-import the model."
         }
     }
 }

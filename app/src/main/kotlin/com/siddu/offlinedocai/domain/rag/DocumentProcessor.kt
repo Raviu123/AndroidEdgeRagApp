@@ -51,57 +51,139 @@ sealed class DocumentProcessingException(message: String, cause: Throwable? = nu
 object DocumentProcessor {
 
     private const val TAG = "DocumentProcessor"
+    private val MULTI_SPACE = Regex("[ \\t]{2,}")
 
     /**
      * Public entry point – determines the file type from the Uri and forwards to the appropriate extractor.
      */
     suspend fun extractDocument(context: Context, uri: Uri): ExtractedDocument = withContext(Dispatchers.IO) {
-        // Initialise PDFBox once – safe to call multiple times.
-        PDFBoxResourceLoader.init(context.applicationContext)
-
         val resolver = context.contentResolver
-        val mimeType = resolver.getType(uri) ?: ""
-        val path = uri.path ?: ""
-        return@withContext when {
-            mimeType.endsWith("pdf") || path.endsWith(".pdf", ignoreCase = true) -> extractPdf(resolver.openInputStream(uri))
-            mimeType.endsWith("msword") || mimeType.endsWith("vnd.openxmlformats-officedocument.wordprocessingml.document") || path.endsWith(".docx", ignoreCase = true) -> extractDocx(resolver.openInputStream(uri))
-            mimeType.endsWith("plain") || path.endsWith(".txt", ignoreCase = true) -> extractTxt(resolver.openInputStream(uri))
-            else -> throw DocumentProcessingException.FileNotFound("Unsupported file type or unable to determine type for Uri: $uri")
+        val kind = detectKind(resolver.getType(uri) ?: "", uri.path ?: "")
+        extract(context, kind) { resolver.openInputStream(uri) }
+    }
+
+    /** Extracts from the app's private copy of an imported file. */
+    suspend fun extractDocument(context: Context, file: java.io.File, mimeType: String?): ExtractedDocument =
+        withContext(Dispatchers.IO) {
+            val kind = detectKind(mimeType ?: "", file.name)
+            extract(context, kind) { file.inputStream() }
+        }
+
+    enum class Kind { PDF, DOCX, TXT }
+
+    fun detectKind(mimeType: String, nameOrPath: String): Kind {
+        val lowerName = nameOrPath.lowercase()
+        return when {
+            mimeType.endsWith("pdf") || lowerName.endsWith(".pdf") -> Kind.PDF
+            mimeType.endsWith("vnd.openxmlformats-officedocument.wordprocessingml.document") || lowerName.endsWith(".docx") -> Kind.DOCX
+            mimeType == "application/msword" || lowerName.endsWith(".doc") ->
+                throw DocumentProcessingException.FileNotFound("Legacy .doc files are not supported. Save the file as .docx or PDF and import it again.")
+            mimeType.startsWith("text/") || lowerName.endsWith(".txt") || lowerName.endsWith(".md") -> Kind.TXT
+            else -> throw DocumentProcessingException.FileNotFound("Unsupported file type. Import a PDF, DOCX or TXT file.")
         }
     }
 
+    private fun extract(context: Context, kind: Kind, open: () -> InputStream?): ExtractedDocument {
+        val document = when (kind) {
+            Kind.PDF -> {
+                PDFBoxResourceLoader.init(context.applicationContext)
+                extractPdf(open(), context.cacheDir)
+            }
+            Kind.DOCX -> extractDocx(open())
+            Kind.TXT -> extractTxt(open())
+        }
+        if (document.pages.none { it.text.isNotBlank() }) {
+            throw DocumentProcessingException.EmptyDocument(
+                if (kind == Kind.PDF) "No selectable text was found. This looks like a scanned or image-only PDF; OCR is not supported yet."
+                else "The document contains no readable text."
+            )
+        }
+        return document
+    }
+
     /**
-     * Extract text page‑by‑page from a PDF InputStream.
+     * Extract text page‑by‑page from a PDF InputStream in a single O(N) pass.
      */
-    private fun extractPdf(inputStream: InputStream?): ExtractedDocument {
+    private fun extractPdf(inputStream: InputStream?, tempDir: java.io.File?): ExtractedDocument {
         if (inputStream == null) throw DocumentProcessingException.UriOpeningFailed("Cannot open InputStream for PDF")
         try {
             inputStream.use { stream ->
-                PDDocument.load(stream).use { document ->
+                // Large PDFs are buffered in a temp file instead of RAM (only 16 MB is kept in memory).
+                val memory = com.tom_roush.pdfbox.io.MemoryUsageSetting.setupMixed(16L * 1024 * 1024).also { s -> tempDir?.let { s.setTempDir(it) } }
+                PDDocument.load(stream, memory).use { document ->
                     val pageCount = document.numberOfPages
                     if (pageCount == 0) throw DocumentProcessingException.EmptyDocument("PDF contains no pages")
-                    val stripper = PDFTextStripper()
+                    
                     val pages = mutableListOf<ExtractedPage>()
-                    for (i in 1..pageCount) {
-                        stripper.startPage = i
-                        stripper.endPage = i
-                        val rawText = stripper.getText(document).replace("\r\n", "\n").trim()
-                        if (rawText.isNotEmpty()) {
-                            pages.add(ExtractedPage(pageNumber = i, text = rawText))
+                    val stripper = object : PDFTextStripper() {
+                        private var currentPageText = StringBuilder()
+                        private var currentPageNum = 1
+
+                        override fun startPage(page: com.tom_roush.pdfbox.pdmodel.PDPage?) {
+                            currentPageText.clear()
+                            currentPageNum = currentPageNo
+                        }
+
+                        override fun writeString(text: String?, textPositions: MutableList<com.tom_roush.pdfbox.text.TextPosition>?) {
+                            if (text != null) {
+                                currentPageText.append(text)
+                            }
+                        }
+
+                        // PDFBox emits inter-word gaps through writeWordSeparator(); without this override,
+                        // PDFs that position words instead of storing space glyphs come out as "Thequickbrownfox".
+                        override fun writeWordSeparator() {
+                            currentPageText.append(' ')
+                        }
+
+                        override fun writeLineSeparator() {
+                            currentPageText.append("\n")
+                        }
+
+                        override fun writeParagraphSeparator() {
+                            currentPageText.append("\n\n")
+                        }
+
+                        override fun endPage(page: com.tom_roush.pdfbox.pdmodel.PDPage?) {
+                            val trimmed = currentPageText.toString().replace("\r\n", "\n").replace(MULTI_SPACE, " ").trim()
+                            if (trimmed.isNotEmpty()) {
+                                pages.add(ExtractedPage(pageNumber = currentPageNum, text = trimmed))
+                            }
                         }
                     }
+                    
+                    // Single-pass O(N) extraction across all pages
+                    stripper.getText(document)
+
+                    if (pages.isEmpty()) {
+                        // Fallback in case document has non-standard page stream
+                        val allText = PDFTextStripper().getText(document).trim()
+                        if (allText.isNotEmpty()) {
+                            pages.add(ExtractedPage(pageNumber = 1, text = allText))
+                        }
+                    }
+
                     return ExtractedDocument(pageCount = pageCount, pages = pages)
                 }
             }
+        } catch (e: DocumentProcessingException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "PDF extraction failed", e)
             throw DocumentProcessingException.PdfParsingFailed("Failed to parse PDF", e)
         }
     }
 
+    private val HEADING_STYLE = Regex("""(?i)^(heading\s*(\d)|title|subtitle)$""")
+
     /**
-     * Extract text and tables from a DOCX InputStream in document sequence.
-     * DOCX does not expose physical page boundaries; we treat the document as logical pages or single logical unit.
+     * Extract text and tables from a DOCX InputStream in document order.
+     *
+     * Pages: Word records where it last laid out page boundaries (`w:lastRenderedPageBreak`) plus
+     * explicit page breaks; those are used as page numbers, so citations and "page N" questions work
+     * for DOCX too. Files saved without layout information form a single page.
+     * Headings: paragraphs with a Heading/Title style are emitted as Markdown headings, which the
+     * chunker uses as reliable section boundaries.
      */
     private fun extractDocx(inputStream: InputStream?): ExtractedDocument {
         if (inputStream == null) throw DocumentProcessingException.UriOpeningFailed("Cannot open InputStream for DOCX")
@@ -110,52 +192,98 @@ object DocumentProcessor {
                 XWPFDocument(stream).use { doc ->
                     val bodyElements = doc.bodyElements
                     if (bodyElements.isEmpty()) throw DocumentProcessingException.EmptyDocument("DOCX contains no readable text")
-                    val textBuilder = StringBuilder()
+                    val pages = mutableListOf<StringBuilder>(StringBuilder())
+                    fun newPage() { if (pages.last().isNotBlank()) pages.add(StringBuilder()) }
+
                     for (elem in bodyElements) {
                         when (elem) {
                             is org.apache.poi.xwpf.usermodel.XWPFParagraph -> {
+                                val xml = runCatching { elem.ctp.xmlText() }.getOrDefault("")
+                                val breaks = countOccurrences(xml, "lastRenderedPageBreak") + countOccurrences(xml, "w:type=\"page\"")
+                                val breakBefore = elem.isPageBreak ||
+                                    (breaks > 0 && elem.runs.firstOrNull()?.let { r -> runCatching { r.ctr.xmlText() }.getOrDefault("").let { "lastRenderedPageBreak" in it || "w:type=\"page\"" in it } } == true)
+                                if (breakBefore) newPage()
                                 val pText = elem.text.trim()
                                 if (pText.isNotEmpty()) {
-                                    textBuilder.append(pText).append("\n\n")
+                                    val level = HEADING_STYLE.find(elem.style.orEmpty())?.let { m -> m.groupValues[2].toIntOrNull() ?: 1 }
+                                    val line = if (level != null && pText.length <= 120 && !pText.contains('\n')) "#".repeat(level.coerceIn(1, 6)) + " " + pText else pText
+                                    pages.last().append(line).append("\n\n")
                                 }
+                                if (breaks > 0 && !breakBefore) newPage()
                             }
                             is org.apache.poi.xwpf.usermodel.XWPFTable -> {
                                 for (row in elem.rows) {
                                     val cells = row.tableCells.map { cell -> cell.text.trim().replace("\n", " ") }
                                     if (cells.any { it.isNotEmpty() }) {
-                                        textBuilder.append("| ").append(cells.joinToString(" | ")).append(" |\n")
+                                        pages.last().append("| ").append(cells.joinToString(" | ")).append(" |\n")
                                     }
                                 }
-                                textBuilder.append("\n")
+                                pages.last().append("\n")
                             }
                         }
                     }
-                    val fullText = textBuilder.toString().trim()
-                    if (fullText.isEmpty()) throw DocumentProcessingException.EmptyDocument("DOCX contains no readable text")
-                    val page = ExtractedPage(pageNumber = 1, text = fullText)
-                    return ExtractedDocument(pageCount = 1, pages = listOf(page))
+                    val extracted = pages.mapIndexedNotNull { i, sb ->
+                        sb.toString().trim().takeIf { it.isNotEmpty() }?.let { ExtractedPage(pageNumber = i + 1, text = it) }
+                    }
+                    if (extracted.isEmpty()) throw DocumentProcessingException.EmptyDocument("DOCX contains no readable text")
+                    return ExtractedDocument(pageCount = pages.size, pages = extracted)
                 }
             }
+        } catch (e: DocumentProcessingException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "DOCX extraction failed", e)
             throw DocumentProcessingException.DocxParsingFailed("Failed to parse DOCX", e)
         }
     }
 
+    private fun countOccurrences(text: String, needle: String): Int {
+        var count = 0
+        var from = text.indexOf(needle)
+        while (from >= 0) {
+            count++
+            from = text.indexOf(needle, from + needle.length)
+        }
+        return count
+    }
+
     /**
-     * Extract text from a plain TXT InputStream preserving line and paragraph structure.
+     * Decodes text files: honours UTF-8/UTF-16 byte-order marks, accepts valid UTF-8, and falls back to
+     * Windows-1252 (the usual encoding of legacy Western text files) instead of producing garbage.
+     */
+    fun decodeText(bytes: ByteArray): String {
+        fun startsWith(vararg b: Int) = bytes.size >= b.size && b.indices.all { bytes[it] == b[it].toByte() }
+        return when {
+            startsWith(0xEF, 0xBB, 0xBF) -> String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
+            startsWith(0xFF, 0xFE) -> String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+            startsWith(0xFE, 0xFF) -> String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
+            else -> try {
+                Charsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+            } catch (e: java.nio.charset.CharacterCodingException) {
+                String(bytes, java.nio.charset.Charset.forName("windows-1252"))
+            }
+        }
+    }
+
+    /**
+     * Extract text from a plain TXT InputStream preserving line and paragraph structure. Form feeds
+     * (\f, used by printed/exported text) separate pages.
      */
     private fun extractTxt(inputStream: InputStream?): ExtractedDocument {
         if (inputStream == null) throw DocumentProcessingException.UriOpeningFailed("Cannot open InputStream for TXT")
         try {
             inputStream.use { stream ->
-                BufferedReader(InputStreamReader(stream)).use { reader ->
-                    val fullText = reader.readText().replace("\r\n", "\n").trim()
-                    if (fullText.isEmpty()) throw DocumentProcessingException.EmptyDocument("TXT file is empty")
-                    val page = ExtractedPage(pageNumber = 1, text = fullText)
-                    return ExtractedDocument(pageCount = 1, pages = listOf(page))
-                }
+                val fullText = decodeText(stream.readBytes()).replace("\r\n", "\n").replace('\r', '\n')
+                val rawPages = fullText.split('\u000C')
+                val pages = rawPages.mapIndexedNotNull { i, t -> t.trim().takeIf { it.isNotEmpty() }?.let { ExtractedPage(i + 1, it) } }
+                if (pages.isEmpty()) throw DocumentProcessingException.EmptyDocument("TXT file is empty")
+                return ExtractedDocument(pageCount = rawPages.size, pages = pages)
             }
+        } catch (e: DocumentProcessingException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "TXT extraction failed", e)
             throw DocumentProcessingException.TxtParsingFailed("Failed to read TXT file", e)

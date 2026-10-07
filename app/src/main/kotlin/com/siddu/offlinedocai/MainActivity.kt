@@ -55,13 +55,19 @@ import com.siddu.offlinedocai.data.entities.DocumentEntity
 import com.siddu.offlinedocai.data.entities.MessageEntity
 import com.siddu.offlinedocai.data.ai.ModelItem
 import com.siddu.offlinedocai.domain.repository.ChatRepository
-import com.siddu.offlinedocai.ai.embeddings.AvailableEmbeddingModel
-import com.siddu.offlinedocai.ai.embeddings.AvailableEmbeddingModels
+import com.siddu.offlinedocai.domain.repository.DocumentRepository
 import com.siddu.offlinedocai.ai.llm.AvailableLlmModel
 import com.siddu.offlinedocai.ai.llm.AvailableLlmModels
 import com.siddu.offlinedocai.ai.export.ChatExporter
+import com.siddu.offlinedocai.ai.queue.QuestionQueueParser
+import com.siddu.offlinedocai.ai.queue.QuestionQueueState
 import com.siddu.offlinedocai.ui.components.MarkdownMessage
-import com.siddu.offlinedocai.domain.repository.DownloadState
+import com.siddu.offlinedocai.data.download.DownloadStatus
+import com.siddu.offlinedocai.ai.llm.LlmLoadState
+import com.siddu.offlinedocai.ai.embeddings.AvailableEmbeddingModels
+import com.siddu.offlinedocai.ai.embeddings.EmbeddingModelSpec
+import com.siddu.offlinedocai.ai.embeddings.EmbeddingModelStatus
+import com.siddu.offlinedocai.data.ai.ModelStatus
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -170,6 +176,7 @@ fun OfflineDocAIApp(mainViewModel: MainViewModel = viewModel()) {
         val conversations by mainViewModel.conversations.collectAsState()
         val documents by mainViewModel.documents.collectAsState()
         val activeModel by mainViewModel.activeLlmModelItem.collectAsState()
+        val llmLoadState by mainViewModel.llmLoadState.collectAsState()
 
         var convToRename by remember { mutableStateOf<ConversationEntity?>(null) }
         var convToDelete by remember { mutableStateOf<ConversationEntity?>(null) }
@@ -248,6 +255,7 @@ fun OfflineDocAIApp(mainViewModel: MainViewModel = viewModel()) {
                         conversations = conversations,
                         documentsCount = documents.size,
                         activeModel = activeModel,
+                        llmLoadState = llmLoadState,
                         themeMode = themeMode,
                         onNewChat = {
                             scope.launch {
@@ -298,6 +306,7 @@ fun OfflineDocAIApp(mainViewModel: MainViewModel = viewModel()) {
                 }
             }
         ) {
+          Box(modifier = Modifier.fillMaxSize()) {
             NavHost(
                 navController = navController,
                 startDestination = "chat?convId=-1"
@@ -351,6 +360,44 @@ fun OfflineDocAIApp(mainViewModel: MainViewModel = viewModel()) {
                     )
                 }
             }
+
+            // App-wide messages (model problems found at startup, download/switch results).
+            val snackbarHostState = remember { SnackbarHostState() }
+            val userMessage by mainViewModel.userMessage.collectAsState()
+            LaunchedEffect(userMessage) {
+                userMessage?.let {
+                    snackbarHostState.showSnackbar(it, withDismissAction = true, duration = SnackbarDuration.Long)
+                    mainViewModel.consumeUserMessage()
+                }
+            }
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 88.dp)
+            )
+
+            // "Download finished — use it now?"
+            val pendingSwitch by mainViewModel.pendingSwitch.collectAsState()
+            pendingSwitch?.let { pending ->
+                val reindexCount = if (pending.isEmbedding) mainViewModel.documentsToReindex() else 0
+                AlertDialog(
+                    onDismissRequest = { mainViewModel.dismissPendingSwitch() },
+                    title = { Text("${pending.name} is ready") },
+                    text = {
+                        Text(
+                            if (pending.isEmbedding) {
+                                "Use it as the search model now?" + if (reindexCount > 0) " Your $reindexCount document(s) will be re-indexed in the background." else ""
+                            } else {
+                                "Use it as the language model now?"
+                            }
+                        )
+                    },
+                    confirmButton = { TextButton(onClick = { mainViewModel.confirmPendingSwitch() }) { Text("Use now") } },
+                    dismissButton = { TextButton(onClick = { mainViewModel.dismissPendingSwitch() }) { Text("Later") } }
+                )
+            }
+          }
         }
     }
 }
@@ -364,6 +411,7 @@ fun ChatGPTDrawerContent(
     conversations: List<ConversationEntity>,
     documentsCount: Int,
     activeModel: ModelItem?,
+    llmLoadState: LlmLoadState = LlmLoadState.NoModel,
     themeMode: MainViewModel.ThemeMode,
     onNewChat: () -> Unit,
     onSelectConversation: (Long) -> Unit,
@@ -629,24 +677,25 @@ fun ChatGPTDrawerContent(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val (statusText, statusColor) = llmStatusLabel(llmLoadState)
                 Box(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(ChatGPTGreen)
+                        .background(statusColor)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = activeModel?.displayName ?: "Qwen 2.5 1.5B",
+                    text = activeModel?.displayName ?: "No Model Active",
                     style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    text = "Local",
+                    text = statusText,
                     style = MaterialTheme.typography.labelSmall,
-                    color = ChatGPTGreen,
+                    color = statusColor,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -759,6 +808,7 @@ fun ChatScreen(
     val documents by viewModel.documents.collectAsState()
     val chatState by viewModel.chatState.collectAsState()
     val selectedAnswerLength by viewModel.selectedAnswerLength.collectAsState()
+    val questionQueueState by viewModel.questionQueueState.collectAsState()
 
     val activeConv = conversations.firstOrNull { it.id == convId }
     val messagesState = remember(convId) {
@@ -773,6 +823,7 @@ fun ChatScreen(
         mutableStateOf(activeConv?.documentId)
     }
     var showDocumentPicker by remember { mutableStateOf(false) }
+    var showBatchQueueDialog by remember { mutableStateOf(false) }
     var chatMenuExpanded by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
@@ -784,10 +835,30 @@ fun ChatScreen(
         }
     }
 
-    val isBusy = chatState is ChatRepository.ChatState.Thinking ||
-        chatState is ChatRepository.ChatState.Retrieving ||
+    val isBusy = chatState is ChatRepository.ChatState.Retrieving || chatState is ChatRepository.ChatState.Preparing ||
         chatState is ChatRepository.ChatState.Generating
     val documentPickerState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    if (showBatchQueueDialog) {
+        BatchQuestionsDialog(
+            onDismiss = { showBatchQueueDialog = false },
+            onStartQueue = { questions ->
+                val effectiveDocIds = if (selectedDocId != null) listOf(selectedDocId!!) else emptyList()
+                if (convId == null || convId <= 0L) {
+                    coroutineScope.launch {
+                        val title = questions.firstOrNull()?.take(30)?.trim()?.ifBlank { "Batch Chat" } ?: "Batch Chat"
+                        val newId = viewModel.startConversation(title, effectiveDocIds)
+                        viewModel.startQuestionQueue(newId, questions, effectiveDocIds)
+                        navController.navigate("chat?convId=$newId") {
+                            popUpTo("chat?convId=-1") { inclusive = true }
+                        }
+                    }
+                } else {
+                    viewModel.startQuestionQueue(convId, questions, effectiveDocIds)
+                }
+            }
+        )
+    }
 
     if (showDocumentPicker) {
         ModalBottomSheet(
@@ -819,7 +890,7 @@ fun ChatScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
-                                        text = "All documents",
+                                        text = "No document (general chat)",
                                         style = MaterialTheme.typography.bodyLarge,
                                         modifier = Modifier.padding(16.dp)
                                     )
@@ -929,6 +1000,14 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showBatchQueueDialog = true }) {
+                        Icon(
+                            Icons.Default.PlaylistPlay,
+                            contentDescription = "Batch Questions Queue",
+                            tint = if (questionQueueState.isActive) ChatGPTGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     if (convId != null && convId > 0L) {
                         Box {
                             IconButton(onClick = { chatMenuExpanded = true }) {
@@ -938,6 +1017,14 @@ fun ChatScreen(
                                 expanded = chatMenuExpanded,
                                 onDismissRequest = { chatMenuExpanded = false }
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text("Batch Question Queue") },
+                                    onClick = {
+                                        chatMenuExpanded = false
+                                        showBatchQueueDialog = true
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.PlaylistPlay, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                                )
                                 DropdownMenuItem(
                                     text = { Text("Rename Chat") },
                                     onClick = {
@@ -1020,6 +1107,16 @@ fun ChatScreen(
                 .padding(padding)
                 .imePadding()
         ) {
+            // Batch Queue Active Banner
+            if (questionQueueState.isActive) {
+                QuestionQueueBanner(
+                    queueState = questionQueueState,
+                    onPause = { viewModel.pauseQuestionQueue() },
+                    onResume = { viewModel.resumeQuestionQueue() },
+                    onStop = { viewModel.stopQuestionQueue() }
+                )
+            }
+
             // Main Chat Area
             if (messages.isEmpty() && !isBusy && chatState !is ChatRepository.ChatState.Error) {
                 // ChatGPT Hero Home Screen
@@ -1052,10 +1149,10 @@ fun ChatScreen(
                         }
                     }
 
-                    // Generation Indicator State
+                    // Generation Indicator State with live timer
                     if (isBusy) {
                         item {
-                            AssistantThinkingItem()
+                            AssistantThinkingItem(chatState = chatState)
                         }
                     }
 
@@ -1100,12 +1197,17 @@ fun ChatScreen(
                 onTextChanged = { textInput = it },
                 onSend = { submitMessage(textInput) },
                 isBusy = isBusy,
+                onStop = { viewModel.stopGeneration() },
                 selectedDocument = documents.firstOrNull { it.id == selectedDocId },
                 onOpenDocumentPicker = { showDocumentPicker = true },
                 onClearSelectedDoc = { selectedDocId = null },
                 answerLength = selectedAnswerLength,
                 onToggleAnswerLength = {
-                    val next = if (selectedAnswerLength == AnswerLength.SHORT) AnswerLength.LONG else AnswerLength.SHORT
+                    val next = when (selectedAnswerLength) {
+                        AnswerLength.DEFAULT -> AnswerLength.SHORT
+                        AnswerLength.SHORT -> AnswerLength.LONG
+                        AnswerLength.LONG -> AnswerLength.DEFAULT
+                    }
                     viewModel.setAnswerLength(next)
                 }
             )
@@ -1208,8 +1310,28 @@ fun AssistantMessageItem(text: String) {
 }
 
 @Composable
-fun AssistantThinkingItem() {
-    val statusLabel = "Thinking"
+fun AssistantThinkingItem(chatState: ChatRepository.ChatState = ChatRepository.ChatState.Retrieving) {
+    var elapsedSeconds by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            elapsedSeconds++
+        }
+    }
+
+    val stateSeconds = if (chatState is ChatRepository.ChatState.Generating && chatState.elapsedSeconds > 0) {
+        chatState.elapsedSeconds
+    } else {
+        elapsedSeconds
+    }
+
+    val statusLabel = when (chatState) {
+        is ChatRepository.ChatState.Retrieving -> "Searching documents"
+        is ChatRepository.ChatState.Preparing -> "Preparing the model"
+        is ChatRepository.ChatState.Generating -> "Generating response"
+        else -> "Thinking"
+    }
+    val partialText = (chatState as? ChatRepository.ChatState.Generating)?.partialText.orEmpty()
 
     // Animated dots
     var dotCount by remember { mutableIntStateOf(0) }
@@ -1221,6 +1343,7 @@ fun AssistantThinkingItem() {
     }
     val dots = ".".repeat(dotCount)
 
+    Column(modifier = Modifier.fillMaxWidth()) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1255,10 +1378,228 @@ fun AssistantThinkingItem() {
         }
         Spacer(modifier = Modifier.width(10.dp))
         Text(
-            text = "$statusLabel$dots",
+            text = "$statusLabel$dots (${stateSeconds}s)",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+    // The answer streams in while it is generated.
+    if (partialText.isNotBlank()) {
+        AssistantMessageItem(text = partialText)
+    }
+    }
+}
+
+// =========================================================================
+// BATCH QUESTIONS QUEUE DIALOG & BANNER
+// =========================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BatchQuestionsDialog(
+    onDismiss: () -> Unit,
+    onStartQueue: (List<String>) -> Unit
+) {
+    var rawInput by remember {
+        mutableStateOf("[\n  \"What is the summary of this document?\",\n  \"What are the key findings?\",\n  \"What are the conclusions?\"\n]")
+    }
+    val parsedQuestions = remember(rawInput) {
+        QuestionQueueParser.parseQuestions(rawInput)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.PlaylistPlay,
+                    contentDescription = null,
+                    tint = ChatGPTGreen,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Batch Question Queue",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+            ) {
+                Text(
+                    text = "Enter a JSON array of strings or one question per line. The AI will process each question sequentially.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = rawInput,
+                    onValueChange = { rawInput = it },
+                    placeholder = {
+                        Text(
+                            "[\n  \"What is the main topic?\",\n  \"What are the key conclusions?\"\n]",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (parsedQuestions.isNotEmpty()) ChatGPTGreen.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = if (parsedQuestions.isNotEmpty()) "${parsedQuestions.size} questions detected" else "0 questions detected",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (parsedQuestions.isNotEmpty()) ChatGPTGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    TextButton(
+                        onClick = {
+                            rawInput = "[\n  \"What is the main summary?\",\n  \"What are the key findings?\",\n  \"What are the conclusions?\"\n]"
+                        }
+                    ) {
+                        Text("Reset Example", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (parsedQuestions.isNotEmpty()) {
+                        onStartQueue(parsedQuestions)
+                        onDismiss()
+                    }
+                },
+                enabled = parsedQuestions.isNotEmpty(),
+                colors = ButtonDefaults.buttonColors(containerColor = ChatGPTGreen)
+            ) {
+                Text("Start Queue (${parsedQuestions.size})", color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun QuestionQueueBanner(
+    queueState: QuestionQueueState,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onStop: () -> Unit
+) {
+    if (!queueState.isActive) return
+
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = if (queueState.isPaused) Icons.Default.PauseCircle else Icons.Default.PlaylistPlay,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (queueState.isPaused) "Queue Paused (${queueState.completedCount}/${queueState.totalQuestions})"
+                               else "Queue: ${queueState.completedCount + 1}/${queueState.totalQuestions}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { if (queueState.isPaused) onResume() else onPause() },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (queueState.isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = if (queueState.isPaused) "Resume" else "Pause",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onStop,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "Stop Queue",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            if (!queueState.currentQuestion.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Current: \"${queueState.currentQuestion}\"",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = {
+                    if (queueState.totalQuestions > 0) {
+                        queueState.completedCount.toFloat() / queueState.totalQuestions
+                    } else 0f
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = ChatGPTGreen,
+                trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f)
+            )
+        }
     }
 }
 
@@ -1272,6 +1613,7 @@ fun ChatGPTComposer(
     onTextChanged: (String) -> Unit,
     onSend: () -> Unit,
     isBusy: Boolean,
+    onStop: (() -> Unit)? = null,
     selectedDocument: DocumentEntity?,
     onOpenDocumentPicker: () -> Unit,
     onClearSelectedDoc: () -> Unit,
@@ -1344,10 +1686,15 @@ fun ChatGPTComposer(
                         modifier = Modifier.padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val (label, color) = when (answerLength) {
+                            AnswerLength.DEFAULT -> "Default" to MaterialTheme.colorScheme.onSurfaceVariant
+                            AnswerLength.SHORT -> "Short" to MaterialTheme.colorScheme.onSurface
+                            AnswerLength.LONG -> "Long" to ChatGPTGreen
+                        }
                         Text(
-                            text = if (answerLength == AnswerLength.SHORT) "Short" else "Long",
+                            text = "Length: $label",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = if (answerLength == AnswerLength.LONG) ChatGPTGreen else MaterialTheme.colorScheme.onSurface
+                            color = color
                         )
                     }
                 }
@@ -1409,22 +1756,20 @@ fun ChatGPTComposer(
 
                     // Circular Send Button
                     val canSend = textInput.isNotBlank() && !isBusy
+                    val canStop = isBusy && onStop != null
                     Box(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(
-                                if (canSend) ChatGPTGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                                if (canSend || canStop) ChatGPTGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
                             )
-                            .clickable(enabled = canSend) { onSend() },
+                            .clickable(enabled = canSend || canStop) { if (isBusy) onStop?.invoke() else onSend() },
                         contentAlignment = Alignment.Center
                     ) {
                         if (isBusy) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                color = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            // Stop button: ends the current answer and keeps what was written so far.
+                            Box(modifier = Modifier.size(12.dp).background(Color.White, RoundedCornerShape(2.dp)))
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Send,
@@ -1453,6 +1798,7 @@ fun DocumentsScreen(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val documents by viewModel.documents.collectAsState()
+    val importState by viewModel.importState.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var docToDelete by remember { mutableStateOf<DocumentEntity?>(null) }
 
@@ -1528,6 +1874,142 @@ fun DocumentsScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
+            // Live Import Progress Banner
+            when (val state = importState) {
+                is DocumentRepository.ImportState.Reading -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp), color = ChatGPTGreen)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Reading \"${state.documentName}\"...",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                is DocumentRepository.ImportState.Chunking -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp), color = ChatGPTGreen)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Chunking \"${state.documentName}\" (${state.pageCount} pages)...",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                is DocumentRepository.ImportState.Embedding -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Indexing \"${state.documentName}\"",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "${state.current}/${state.total} (${state.percent}%)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = ChatGPTGreen
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            LinearProgressIndicator(
+                                progress = { state.percent / 100f },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
+                                color = ChatGPTGreen,
+                                trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f)
+                            )
+                        }
+                    }
+                }
+                is DocumentRepository.ImportState.Saving -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp), color = ChatGPTGreen)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Saving chunks & vectors for \"${state.documentName}\"...",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                is DocumentRepository.ImportState.Error -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Import failed: ${state.message}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+                else -> {}
+            }
+
             // Search Bar
             OutlinedTextField(
                 value = searchQuery,
@@ -1583,7 +2065,8 @@ fun DocumentsScreen(
                             onViewDetail = {
                                 navController.navigate("documentDetail/${doc.id}")
                             },
-                            onDelete = { docToDelete = doc }
+                            onDelete = { docToDelete = doc },
+                            onReprocess = { viewModel.reprocessDocument(doc) }
                         )
                     }
                 }
@@ -1597,9 +2080,18 @@ fun DocumentCardItem(
     document: DocumentEntity,
     onAsk: () -> Unit,
     onViewDetail: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onReprocess: () -> Unit = {}
 ) {
     val isReady = document.status == "COMPLETED" || document.status == "READY"
+    val isProcessing = document.status == "PROCESSING"
+    val isFailed = document.status == "FAILED"
+
+    val statusColor = when {
+        isReady -> ChatGPTGreen
+        isFailed -> MaterialTheme.colorScheme.error
+        else -> Color(0xFFFF9800)
+    }
 
     Surface(
         onClick = onViewDetail,
@@ -1616,15 +2108,23 @@ fun DocumentCardItem(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (isReady) ChatGPTGreen.copy(alpha = 0.15f) else Color(0xFFFF9800).copy(alpha = 0.15f)),
+                        .background(statusColor.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Description,
-                        contentDescription = null,
-                        tint = if (isReady) ChatGPTGreen else Color(0xFFFF9800),
-                        modifier = Modifier.size(20.dp)
-                    )
+                    if (isProcessing) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = statusColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (isFailed) Icons.Default.Error else Icons.Default.Description,
+                            contentDescription = null,
+                            tint = statusColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
@@ -1636,10 +2136,15 @@ fun DocumentCardItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    val statusText = when {
+                        isReady -> "${document.pageCount} pages • Indexed"
+                        isFailed -> "Processing failed"
+                        else -> if (document.pageCount > 0) "${document.pageCount} pages • Processing..." else "Reading & processing..."
+                    }
                     Text(
-                        text = "${document.pageCount} pages • ${if (isReady) "Indexed" else "Processing..."}",
+                        text = statusText,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isReady) ChatGPTGreen else Color(0xFFFF9800)
+                        color = statusColor
                     )
                 }
 
@@ -1653,6 +2158,18 @@ fun DocumentCardItem(
                 }
             }
 
+            if (isProcessing) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(1.5.dp)),
+                    color = ChatGPTGreen,
+                    trackColor = ChatGPTGreen.copy(alpha = 0.15f)
+                )
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
 
             // Action Row
@@ -1661,6 +2178,19 @@ fun DocumentCardItem(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                if (isFailed) {
+                    OutlinedButton(
+                        onClick = onReprocess,
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Retry", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
                 TextButton(onClick = onViewDetail) {
                     Text("Details", style = MaterialTheme.typography.labelMedium)
                 }
@@ -1736,21 +2266,36 @@ fun DocumentDetailScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(
-                    onClick = {
-                        coroutineScope.launch {
-                            val newId = viewModel.startConversation("Chat: ${doc.name.take(20)}", listOf(doc.id))
-                            navController.navigate("chat?convId=$newId") {
-                                launchSingleTop = true
+                val isReady = doc.status == "COMPLETED" || doc.status == "READY"
+                if (isReady) {
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                val newId = viewModel.startConversation("Chat: ${doc.name.take(20)}", listOf(doc.id))
+                                navController.navigate("chat?convId=$newId") {
+                                    launchSingleTop = true
+                                }
                             }
-                        }
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Chat, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Start Conversation with this Document")
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Chat, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Start Conversation with this Document")
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            viewModel.reprocessDocument(doc)
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Re-index / Retry Document Processing")
+                    }
                 }
             }
         }
@@ -1783,52 +2328,88 @@ fun SettingsScreen(
     navController: NavHostController,
     onOpenDrawer: () -> Unit
 ) {
+    val context = LocalContext.current
     val themeMode by viewModel.themeMode.collectAsState()
     val installedModels by viewModel.installedModels.collectAsState()
     val activeModel by viewModel.activeLlmModelItem.collectAsState()
-    val isEmbedReady by viewModel.isEmbeddingModelDownloaded.collectAsState()
-
-    val downloadedLlmModels by viewModel.downloadedLlmModels.collectAsState()
-    val selectedLlmModel by viewModel.selectedLlmModel.collectAsState()
-    val currentlyDownloadingLlm by viewModel.currentlyDownloadingModel.collectAsState()
-    val llmDownloadState by viewModel.llmDownloadState.collectAsState()
-
-    val downloadedEmbeddingModels by viewModel.downloadedEmbeddingModels.collectAsState()
-    val selectedEmbeddingModel by viewModel.selectedEmbeddingModel.collectAsState()
-    val currentlyDownloadingEmbed by viewModel.currentlyDownloadingEmbeddingModel.collectAsState()
-    val embeddingDownloadState by viewModel.embeddingDownloadState.collectAsState()
+    val llmLoadState by viewModel.llmLoadState.collectAsState()
+    val downloadStatuses by viewModel.downloadStatuses.collectAsState()
+    val embeddingStatuses by viewModel.embeddingStatuses.collectAsState()
+    val activeEmbeddingId by viewModel.activeEmbeddingId.collectAsState()
+    val embeddingSwitching by viewModel.embeddingSwitchInProgress.collectAsState()
+    val importProgress by viewModel.modelImportProgress.collectAsState()
+    val importError by viewModel.modelImportError.collectAsState()
+    val compatibilityPreferred by viewModel.compatibilityPreferred.collectAsState()
 
     var modelToDelete by remember { mutableStateOf<ModelItem?>(null) }
+    var embeddingToActivate by remember { mutableStateOf<EmbeddingModelSpec?>(null) }
+    var embeddingToDelete by remember { mutableStateOf<EmbeddingModelSpec?>(null) }
 
     val importModelLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) {
-            viewModel.importLlmModel(uri)
+        if (uri != null) viewModel.importLlmModel(uri)
+    }
+    // Android 13+: allow the download progress notification (downloads continue in the background either way).
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val startDownload: (String) -> Unit = { id ->
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
+        viewModel.downloadModel(id)
     }
 
-    if (modelToDelete != null) {
-        val target = modelToDelete!!
+    modelToDelete?.let { target ->
         AlertDialog(
             onDismissRequest = { modelToDelete = null },
-            title = { Text("Remove Model") },
-            text = { Text("Are you sure you want to remove '${target.filename}' (${target.sizeBytes / (1024 * 1024)} MB)?") },
+            title = { Text("Delete model") },
+            text = { Text("Delete '${target.displayName}' (${target.sizeBytes / 1_000_000} MB)? It is unloaded from memory first, so its storage is freed right away.") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.deleteModelItem(target)
-                        modelToDelete = null
-                    }
-                ) {
-                    Text("Remove", color = MaterialTheme.colorScheme.error)
-                }
+                TextButton(onClick = {
+                    viewModel.deleteModelItem(target)
+                    modelToDelete = null
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = {
-                TextButton(onClick = { modelToDelete = null }) {
-                    Text("Cancel")
-                }
-            }
+            dismissButton = { TextButton(onClick = { modelToDelete = null }) { Text("Cancel") } }
+        )
+    }
+
+    embeddingToActivate?.let { spec ->
+        val count = viewModel.documentsToReindex()
+        AlertDialog(
+            onDismissRequest = { embeddingToActivate = null },
+            title = { Text("Switch search model?") },
+            text = {
+                Text(
+                    "The app first checks that ${spec.name} works on this phone." +
+                        if (count > 0) " Then your $count document(s) are re-indexed in the background; they can't be searched until that finishes." else ""
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.activateEmbeddingModel(spec.id)
+                    embeddingToActivate = null
+                }) { Text("Switch") }
+            },
+            dismissButton = { TextButton(onClick = { embeddingToActivate = null }) { Text("Cancel") } }
+        )
+    }
+
+    embeddingToDelete?.let { spec ->
+        AlertDialog(
+            onDismissRequest = { embeddingToDelete = null },
+            title = { Text("Delete search model") },
+            text = { Text("Delete ${spec.name} (${spec.downloadSize})?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteEmbeddingModel(spec.id)
+                    embeddingToDelete = null
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { embeddingToDelete = null }) { Text("Cancel") } }
         )
     }
 
@@ -1837,9 +2418,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = { Text("Settings & Models", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)) },
                 navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Default.Menu, contentDescription = "Menu")
-                    }
+                    IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, contentDescription = "Menu") }
                 }
             )
         }
@@ -1851,42 +2430,22 @@ fun SettingsScreen(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Theme Section
+            // Appearance
             item {
-                Text(
-                    text = "Appearance",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Theme Mode", style = MaterialTheme.typography.bodyMedium)
-                            Row {
+                SectionTitle("Appearance")
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Theme Mode", style = MaterialTheme.typography.bodyMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            MainViewModel.ThemeMode.values().forEach { mode ->
                                 FilterChip(
-                                    selected = themeMode == MainViewModel.ThemeMode.SYSTEM,
-                                    onClick = { viewModel.setThemeMode(MainViewModel.ThemeMode.SYSTEM) },
-                                    label = { Text("System") }
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                FilterChip(
-                                    selected = themeMode == MainViewModel.ThemeMode.LIGHT,
-                                    onClick = { viewModel.setThemeMode(MainViewModel.ThemeMode.LIGHT) },
-                                    label = { Text("Light") }
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                FilterChip(
-                                    selected = themeMode == MainViewModel.ThemeMode.DARK,
-                                    onClick = { viewModel.setThemeMode(MainViewModel.ThemeMode.DARK) },
-                                    label = { Text("Dark") }
+                                    selected = themeMode == mode,
+                                    onClick = { viewModel.setThemeMode(mode) },
+                                    label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) }
                                 )
                             }
                         }
@@ -1894,389 +2453,347 @@ fun SettingsScreen(
                 }
             }
 
-            // Active LLM Model Card
+            // Active language model: real load state
             item {
-                Text(
-                    text = "Active LLM Model",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                SectionTitle("Language model (answers)")
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = activeModel?.displayName ?: selectedLlmModel?.name ?: "Qwen 2.5 1.5B Instruct",
+                                    text = activeModel?.displayName ?: "No model installed",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                 )
-                                val sizeMb = (activeModel?.sizeBytes ?: 1117320736L) / (1024 * 1024)
+                                val detail = when (val s = llmLoadState) {
+                                    is LlmLoadState.Ready -> "Context ${s.contextSize} tokens • CPU ${s.cpuVariant}"
+                                    is LlmLoadState.Failed -> s.reason
+                                    is LlmLoadState.Loading -> "Loading into memory…"
+                                    is LlmLoadState.NotLoaded -> "Loads when you ask a question"
+                                    LlmLoadState.NoModel -> "Download a model below to enable offline AI chat."
+                                }
                                 Text(
-                                    text = "Format: GGUF Q4_K_M • Size: ${sizeMb}MB",
+                                    text = detail,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (llmLoadState is LlmLoadState.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = ChatGPTGreen.copy(alpha = 0.15f)
-                            ) {
-                                Text(
-                                    text = "Ready",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = ChatGPTGreen,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
+                            val (label, color) = llmStatusLabel(llmLoadState)
+                            StatusPill(label, color)
+                        }
+                        if (llmLoadState is LlmLoadState.Loading) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = ChatGPTGreen)
+                        }
+                        if (llmLoadState is LlmLoadState.Failed) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { viewModel.retryLoadLlm() }) { Text("Retry") }
+                                activeModel?.let { m -> OutlinedButton(onClick = { modelToDelete = m }) { Text("Delete") } }
                             }
                         }
                     }
                 }
             }
 
-            // Installed Models & Import
+            // Language model catalog
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Installed GGUF Models",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                    TextButton(onClick = { importModelLauncher.launch(arrayOf("*/*")) }) {
+                    Text("Available language models", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                    TextButton(onClick = { importModelLauncher.launch(arrayOf("*/*")) }, enabled = importProgress == null) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Import GGUF")
                     }
                 }
-
-                if (installedModels.isEmpty()) {
-                    Text(
-                        text = "Using bundled Qwen 2.5 1.5B GGUF model.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        installedModels.forEach { model ->
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = model.filename,
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                                        )
-                                        Text(
-                                            text = "${model.sizeBytes / (1024 * 1024)} MB",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    IconButton(onClick = { modelToDelete = model }, modifier = Modifier.size(28.dp)) {
-                                        Icon(
-                                            imageVector = Icons.Default.Delete,
-                                            contentDescription = "Delete",
-                                            tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                importProgress?.let { p ->
+                    Text("Importing ${p.filename}: ${p.percent}%", style = MaterialTheme.typography.bodySmall)
+                    LinearProgressIndicator(progress = { p.percent / 100f }, modifier = Modifier.fillMaxWidth(), color = ChatGPTGreen)
                 }
-            }
-
-            // SLM / LLM Models Catalog
-            item {
-                Text(
-                    text = "SLM Model Catalog (One-Click Downloads)",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
+                importError?.let { err -> Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 Spacer(modifier = Modifier.height(8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     AvailableLlmModels.list.forEach { model ->
-                        val isDownloaded = downloadedLlmModels.any { it.name == model.fileName }
-                        val isSelected = selectedLlmModel?.name == model.fileName
-                        val isDownloading = currentlyDownloadingLlm == model.fileName && llmDownloadState is DownloadState.Progress
-                        val progress = if (isDownloading) llmDownloadState as DownloadState.Progress else null
-
-                        ModelOptionCard(
-                            model = model,
-                            isDownloaded = isDownloaded,
-                            isSelected = isSelected,
-                            isDownloading = isDownloading,
-                            downloadProgress = progress,
-                            onDownload = {
-                                viewModel.downloadLlmModel(model.downloadUrl, model.fileName)
-                            },
-                            onSelect = {
-                                val file = downloadedLlmModels.firstOrNull { it.name == model.fileName }
-                                if (file != null) viewModel.selectLlmModel(file)
-                            }
+                        val installed = installedModels.firstOrNull { it.filename.equals(model.fileName, ignoreCase = true) }
+                        val isActive = installed != null && activeModel?.id == installed.id
+                        ModelCard(
+                            title = model.name,
+                            subtitle = "${model.parameterSize} params • ${model.downloadSize} • ${model.ramRequirement}",
+                            badge = model.badge,
+                            description = model.description,
+                            state = cardState(
+                                installed = installed != null,
+                                active = isActive,
+                                error = installed?.takeIf { it.status == ModelStatus.ERROR }?.let { it.errorMessage ?: "Damaged or unsupported file" },
+                                download = downloadStatuses[model.id],
+                                activeLabel = llmStatusLabel(llmLoadState).first
+                            ),
+                            onDownload = { startDownload(model.id) },
+                            onCancel = { viewModel.cancelDownload(model.id) },
+                            onDismiss = { viewModel.dismissDownloadStatus(model.id) },
+                            onUse = { installed?.let { viewModel.selectLlmModel(it) } },
+                            onDelete = { installed?.let { modelToDelete = it } }
                         )
                     }
                 }
             }
 
-            // Embedding Models Catalog
-            item {
-                Text(
-                    text = "Embedding Model Catalog",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AvailableEmbeddingModels.list.forEach { model ->
-                        val isDownloaded = downloadedEmbeddingModels.any { it.name == model.fileName }
-                        val isSelected = selectedEmbeddingModel?.name == model.fileName
-                        val isDownloading = currentlyDownloadingEmbed == model.fileName && embeddingDownloadState is DownloadState.Progress
-                        val progress = if (isDownloading) embeddingDownloadState as DownloadState.Progress else null
-
-                        EmbeddingModelOptionCard(
-                            model = model,
-                            isDownloaded = isDownloaded,
-                            isSelected = isSelected,
-                            isDownloading = isDownloading,
-                            downloadProgress = progress,
-                            onDownload = {
-                                viewModel.downloadEmbeddingModel(model.downloadUrl, model.fileName)
-                            },
-                            onSelect = {
-                                val file = downloadedEmbeddingModels.firstOrNull { it.name == model.fileName }
-                                if (file != null) viewModel.selectEmbeddingModel(file)
-                            }
-                        )
-                    }
-                }
+            // Imported models that are not in the catalog
+            val customModels = installedModels.filter { inst ->
+                AvailableLlmModels.list.none { it.fileName.equals(inst.filename, ignoreCase = true) }
             }
-
-            // 100% On-Device Privacy Card
-            item {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = ChatGPTGreen.copy(alpha = 0.1f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, ChatGPTGreen.copy(alpha = 0.3f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = ChatGPTGreen,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "100% Local & Private",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = ChatGPTGreen
-                            )
-                            Text(
-                                text = "All text chunking, embeddings, vector retrieval, and neural inference execute entirely on-device without internet access.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface
+            if (customModels.isNotEmpty()) {
+                item {
+                    Text("Imported models", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        customModels.forEach { m ->
+                            ModelCard(
+                                title = m.displayName.ifBlank { m.filename },
+                                subtitle = "${m.sizeBytes / 1_000_000} MB • ${m.quantization.ifBlank { "GGUF" }}",
+                                badge = null,
+                                description = null,
+                                state = cardState(
+                                    installed = true,
+                                    active = activeModel?.id == m.id,
+                                    error = m.takeIf { it.status == ModelStatus.ERROR }?.let { it.errorMessage ?: "Damaged or unsupported file" },
+                                    download = null,
+                                    activeLabel = llmStatusLabel(llmLoadState).first
+                                ),
+                                onDownload = {},
+                                onCancel = {},
+                                onDismiss = {},
+                                onUse = { viewModel.selectLlmModel(m) },
+                                onDelete = { modelToDelete = m }
                             )
                         }
                     }
                 }
             }
-        }
-    }
-}
 
-@Composable
-fun ModelOptionCard(
-    model: AvailableLlmModel,
-    isDownloaded: Boolean,
-    isSelected: Boolean,
-    isDownloading: Boolean,
-    downloadProgress: DownloadState.Progress?,
-    onDownload: () -> Unit,
-    onSelect: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = when {
-                isSelected -> MaterialTheme.colorScheme.primaryContainer
-                isDownloaded -> MaterialTheme.colorScheme.surfaceVariant
-                else -> MaterialTheme.colorScheme.surface
-            }
-        ),
-        shape = RoundedCornerShape(12.dp),
-        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, ChatGPTGreen) else null,
-        modifier = modifier
-            .fillMaxWidth()
-            .then(if (isDownloaded) Modifier.clickable { onSelect() } else Modifier)
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = model.name,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${model.parameterSize} params • Size: ${model.downloadSize}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                if (isDownloading && downloadProgress != null) {
-                    Text(
-                        "${downloadProgress.percent}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = ChatGPTGreen
-                    )
-                } else if (isDownloaded) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isSelected) ChatGPTGreen else MaterialTheme.colorScheme.secondaryContainer
-                    ) {
-                        Text(
-                            text = if (isSelected) "Active" else "Select",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            // Search (embedding) models
+            item {
+                SectionTitle("Search model (embeddings)")
+                Text(
+                    "Used to index documents and find the passages each answer is based on. If search does not work on your phone, switch to another model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AvailableEmbeddingModels.list.forEach { spec ->
+                        val status = embeddingStatuses[spec.id]
+                        val isActive = spec.id == activeEmbeddingId
+                        val switching = embeddingSwitching == spec.id
+                        val installed = status != null && status != EmbeddingModelStatus.NotInstalled
+                        val activeLabel = when {
+                            status is EmbeddingModelStatus.Loading || switching -> "Checking…"
+                            status is EmbeddingModelStatus.Ready -> "Ready"
+                            else -> "Active"
+                        }
+                        ModelCard(
+                            title = spec.name,
+                            subtitle = "${spec.backendLabel} • ${spec.dimension}-dim • " + if (spec.isBundled) "Built-in" else spec.downloadSize,
+                            badge = spec.badge,
+                            description = spec.description,
+                            state = when {
+                                status is EmbeddingModelStatus.Unsupported -> CardState.Failed("Not supported on this device: ${status.reason}", canRetry = true, canDelete = !spec.isBundled && !isActive, retryDownloads = false)
+                                switching -> CardState.Busy("Checking that it works on this phone…")
+                                else -> cardState(
+                                    installed = installed,
+                                    active = isActive,
+                                    error = null,
+                                    download = downloadStatuses[spec.id],
+                                    activeLabel = activeLabel,
+                                    deletable = !spec.isBundled
+                                )
+                            },
+                            onDownload = { startDownload(spec.id) },
+                            onCancel = { viewModel.cancelDownload(spec.id) },
+                            onDismiss = { viewModel.dismissDownloadStatus(spec.id) },
+                            onUse = { if (!isActive) embeddingToActivate = spec else viewModel.activateEmbeddingModel(spec.id) },
+                            onDelete = { embeddingToDelete = spec }
                         )
                     }
-                } else {
-                    Button(
-                        onClick = onDownload,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Download", style = MaterialTheme.typography.labelSmall)
-                    }
                 }
             }
 
-            if (isDownloading && downloadProgress != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { downloadProgress.percent / 100f },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = ChatGPTGreen
-                )
+            // Advanced
+            item {
+                SectionTitle("Advanced")
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Compatibility mode", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                                Text(
+                                    "Uses the most basic CPU instructions for the local models. Slower, but avoids crashes on some phones. Applies after restarting the app.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(checked = compatibilityPreferred || viewModel.compatibilityModeActive, onCheckedChange = { viewModel.setCompatibilityMode(it) })
+                        }
+                        viewModel.compatibilityReason?.let {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "CPU kernels in use: ${viewModel.cpuVariant.ifBlank { "not loaded yet" }}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun EmbeddingModelOptionCard(
-    model: AvailableEmbeddingModel,
-    isDownloaded: Boolean,
-    isSelected: Boolean,
-    isDownloading: Boolean,
-    downloadProgress: DownloadState.Progress?,
+private fun SectionTitle(text: String) {
+    Text(text = text, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+    Spacer(modifier = Modifier.height(8.dp))
+}
+
+@Composable
+private fun StatusPill(label: String, color: Color) {
+    Surface(shape = RoundedCornerShape(12.dp), color = color.copy(alpha = 0.15f)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = color,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+        )
+    }
+}
+
+/** Label and colour for the language model's real load state. */
+@Composable
+fun llmStatusLabel(state: LlmLoadState): Pair<String, Color> = when (state) {
+    is LlmLoadState.Ready -> "Ready" to ChatGPTGreen
+    is LlmLoadState.Loading -> "Loading…" to MaterialTheme.colorScheme.tertiary
+    is LlmLoadState.Failed -> "Failed" to MaterialTheme.colorScheme.error
+    is LlmLoadState.NotLoaded -> "Installed" to MaterialTheme.colorScheme.primary
+    LlmLoadState.NoModel -> "No model" to MaterialTheme.colorScheme.outline
+}
+
+/** Everything a model card can show; exactly one applies at a time. */
+sealed class CardState {
+    object NotInstalled : CardState()
+    data class Queued(val note: String?) : CardState()
+    data class Downloading(val percent: Int, val bytes: Long, val total: Long) : CardState()
+    data class Busy(val message: String) : CardState()
+    data class Installed(val deletable: Boolean) : CardState()
+    data class Active(val label: String, val deletable: Boolean) : CardState()
+    data class Failed(val message: String, val canRetry: Boolean, val canDelete: Boolean, val retryDownloads: Boolean = true) : CardState()
+}
+
+private fun cardState(
+    installed: Boolean,
+    active: Boolean,
+    error: String?,
+    download: DownloadStatus?,
+    activeLabel: String,
+    deletable: Boolean = true
+): CardState = when {
+    download is DownloadStatus.Queued -> CardState.Queued(download.note)
+    download is DownloadStatus.Downloading -> CardState.Downloading(download.percent, download.bytes, download.total)
+    download is DownloadStatus.Verifying -> CardState.Busy("Verifying the download…")
+    download is DownloadStatus.Failed && !installed -> CardState.Failed(download.message, canRetry = true, canDelete = false)
+    error != null -> CardState.Failed(error, canRetry = false, canDelete = true)
+    active -> CardState.Active(activeLabel, deletable)
+    installed -> CardState.Installed(deletable)
+    else -> CardState.NotInstalled
+}
+
+@Composable
+fun ModelCard(
+    title: String,
+    subtitle: String,
+    badge: String?,
+    description: String?,
+    state: CardState,
     onDownload: () -> Unit,
-    onSelect: () -> Unit,
-    modifier: Modifier = Modifier
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit,
+    onUse: () -> Unit,
+    onDelete: () -> Unit
 ) {
+    val isActive = state is CardState.Active
     Card(
         colors = CardDefaults.cardColors(
             containerColor = when {
-                isSelected -> MaterialTheme.colorScheme.primaryContainer
-                isDownloaded -> MaterialTheme.colorScheme.surfaceVariant
+                isActive -> MaterialTheme.colorScheme.primaryContainer
+                state is CardState.Installed -> MaterialTheme.colorScheme.surfaceVariant
                 else -> MaterialTheme.colorScheme.surface
             }
         ),
         shape = RoundedCornerShape(12.dp),
-        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, ChatGPTGreen) else null,
-        modifier = modifier
-            .fillMaxWidth()
-            .then(if (isDownloaded) Modifier.clickable { onSelect() } else Modifier)
+        border = if (isActive) androidx.compose.foundation.BorderStroke(2.dp, ChatGPTGreen) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = model.name,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleSmall
-                    )
+                    Text(text = title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${model.format} • ${model.dimension}-dim • Size: ${model.downloadSize}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-
-                if (isDownloading && downloadProgress != null) {
-                    Text(
-                        "${downloadProgress.percent}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = ChatGPTGreen
-                    )
-                } else if (isDownloaded) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isSelected) ChatGPTGreen else MaterialTheme.colorScheme.secondaryContainer
-                    ) {
-                        Text(
-                            text = if (isSelected) "Active" else "Select",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                } else {
-                    Button(
-                        onClick = onDownload,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Download", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
+                if (badge != null) StatusPill(badge, MaterialTheme.colorScheme.primary)
             }
-
-            if (isDownloading && downloadProgress != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { downloadProgress.percent / 100f },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = ChatGPTGreen
-                )
+            if (!description.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(text = description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            when (state) {
+                CardState.NotInstalled -> Button(onClick = onDownload, shape = RoundedCornerShape(8.dp)) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Download")
+                }
+                is CardState.Queued -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(state.note ?: "Waiting to download…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onCancel) { Text("Cancel") }
+                }
+                is CardState.Downloading -> Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Downloading ${state.percent}% (${state.bytes / 1_000_000} of ${state.total / 1_000_000} MB)",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onCancel) { Text("Cancel") }
+                    }
+                    LinearProgressIndicator(progress = { state.percent / 100f }, modifier = Modifier.fillMaxWidth(), color = ChatGPTGreen)
+                }
+                is CardState.Busy -> Column {
+                    Text(state.message, style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = ChatGPTGreen)
+                }
+                is CardState.Installed -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = onUse, shape = RoundedCornerShape(8.dp)) { Text("Use this model") }
+                    if (state.deletable) TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }
+                is CardState.Active -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    StatusPill("● Active · ${state.label}", ChatGPTGreen)
+                    Spacer(modifier = Modifier.weight(1f))
+                    if (state.deletable) TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }
+                is CardState.Failed -> Column {
+                    Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (state.canRetry) TextButton(onClick = { if (state.retryDownloads) { onDismiss(); onDownload() } else onUse() }) { Text("Retry") }
+                        if (state.canDelete) TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                        if (!state.canRetry) TextButton(onClick = onDismiss) { Text("Dismiss") }
+                    }
+                }
             }
         }
     }

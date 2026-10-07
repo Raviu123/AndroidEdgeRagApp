@@ -56,16 +56,7 @@ object ChatExporter {
                 turnObj.put("responseTimestamp", msg.timestamp)
 
                 if (includeChunks) {
-                    val chunksArray = JSONArray()
-                    if (!msg.sources.isNullOrBlank()) {
-                        msg.sources.split("|||")
-                            .map { it.trim() }
-                            .filter { it.isNotEmpty() }
-                            .forEach { chunkText ->
-                                chunksArray.put(chunkText)
-                            }
-                    }
-                    turnObj.put("retrievedChunks", chunksArray)
+                    turnObj.put("retrievedChunks", parseSources(msg.sources))
                 }
                 turnsArray.put(turnObj)
                 pendingQuestion = null
@@ -82,18 +73,28 @@ object ChatExporter {
             msgObj.put("content", m.content)
             msgObj.put("timestamp", m.timestamp)
             if (includeChunks && !m.sources.isNullOrBlank()) {
-                val srcArray = JSONArray()
-                m.sources.split("|||")
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
-                    .forEach { srcArray.put(it) }
-                msgObj.put("sources", srcArray)
+                msgObj.put("sources", parseSources(m.sources))
             }
             rawMessagesArray.put(msgObj)
         }
         root.put("rawMessages", rawMessagesArray)
 
         return root.toString(2)
+    }
+
+    /**
+     * Sources are stored as a JSON array of source blocks (see ContextAssembler). Older messages used a
+     * "|||"-separated string; those are exported as plain text entries.
+     */
+    internal fun parseSources(raw: String?): JSONArray {
+        if (raw.isNullOrBlank()) return JSONArray()
+        val trimmed = raw.trim()
+        if (trimmed.startsWith("[")) {
+            runCatching { return JSONArray(trimmed) }
+        }
+        val legacy = JSONArray()
+        trimmed.split("|||").map { it.trim() }.filter { it.isNotEmpty() }.forEach { legacy.put(it) }
+        return legacy
     }
 
     /**

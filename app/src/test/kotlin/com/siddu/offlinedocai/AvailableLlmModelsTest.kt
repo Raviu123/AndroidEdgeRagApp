@@ -39,11 +39,13 @@ class AvailableLlmModelsTest {
         val qwen15 = AvailableLlmModels.list.find { it.id == "qwen-1.5b" }
         assertNotNull("Qwen 1.5B model should exist", qwen15)
         assertEquals("qwen2.5-1.5b-instruct-q4_k_m.gguf", qwen15!!.fileName)
-        assertTrue(qwen15.downloadSize.contains("1.0 GB") || qwen15.downloadSize.contains("990 MB"))
+        assertEquals("1.1 GB", qwen15.downloadSize)
+        assertEquals("491 MB", AvailableLlmModels.list.first { it.id == "qwen-0.5b" }.downloadSize)
+        assertEquals("808 MB", AvailableLlmModels.list.first { it.id == "llama-1b" }.downloadSize)
 
         val deepseekR1 = AvailableLlmModels.list.find { it.id == "deepseek-r1-1.5b" }
         assertNotNull("DeepSeek R1 model should exist", deepseekR1)
         assertEquals("DeepSeek-R1-Distill-Qwen-1.5B-Q6_K.gguf", deepseekR1!!.fileName)
-        assertTrue(deepseekR1.downloadSize.contains("1.5 GB"))
+        assertEquals("1.5 GB", deepseekR1.downloadSize)
     }
 }

@@ -10,16 +10,18 @@ package com.siddu.offlinedocai.ai.llm
  * remain identical for both SHORT and LONG.
  */
 enum class AnswerLength(val label: String) {
+    DEFAULT("Default"),
     SHORT("Short"),
     LONG("Long");
 
     companion object {
-        val DEFAULT = SHORT
+        val DEFAULT_MODE = DEFAULT
 
         fun fromString(value: String?): AnswerLength {
             return when (value?.trim()?.uppercase()) {
                 "LONG" -> LONG
-                else -> SHORT
+                "SHORT" -> SHORT
+                else -> DEFAULT
             }
         }
     }
