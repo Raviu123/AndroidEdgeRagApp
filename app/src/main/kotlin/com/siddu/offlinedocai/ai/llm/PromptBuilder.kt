@@ -18,8 +18,8 @@ object PromptBuilder {
 
     private fun lengthInstruction(length: AnswerLength): String = when (length) {
         AnswerLength.SHORT -> "Be brief: answer in one to three sentences."
-        AnswerLength.DEFAULT -> "Answer clearly and completely: a short paragraph, or a list when the question asks for several items."
-        AnswerLength.LONG -> "Give a detailed, well-organised answer that covers every relevant point in the sources. Use bullet points or numbered steps where they help."
+        AnswerLength.DEFAULT -> "Answer thoroughly: explain the relevant details in one or two well-developed paragraphs, or use a list with a sentence of explanation per item when the question asks for several items."
+        AnswerLength.LONG -> "Give a detailed, comprehensive answer that covers every relevant point and explains each one fully. Organise it with bullet points, numbered steps or short headings where they help."
     }
 
     fun groundedSystemPrompt(length: AnswerLength, isBudgetLimited: Boolean): String = buildString {

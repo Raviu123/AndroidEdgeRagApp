@@ -57,6 +57,19 @@ class LlamaRunner(context: Context) {
     private val _runnerState = MutableStateFlow(if (isNativeLoaded) LlamaState.UNINITIALIZED else LlamaState.ERROR)
     val runnerState: StateFlow<LlamaState> = _runnerState.asStateFlow()
 
+    data class InferenceMetrics(
+        val modelName: String,
+        val ttftMs: Long,
+        val decodeMs: Long,
+        val totalGenerationMs: Long,
+        val generatedTokens: Int,
+        val tokensPerSecond: Double
+    )
+
+    @Volatile
+    var lastInferenceMetrics: InferenceMetrics? = null
+        private set
+
     val currentState: LlamaState get() = _runnerState.value
     val isGenerating: Boolean get() = _runnerState.value == LlamaState.GENERATING
 
@@ -175,13 +188,48 @@ class LlamaRunner(context: Context) {
         token.onCancel = { cancelNative(token) }
         if (token.isCancelled) LlamaNative.nativeCancel(ptr)
         try {
-            val listener = onPartial?.let { cb -> NativeTextListener { bytes -> cb(bytes.toString(Charsets.UTF_8)) } }
+            var firstTokenTimeMs = 0L
+            val promptTokens = countTokens(prompt, isPrompt = true) ?: 0
+            val listener = NativeTextListener { bytes ->
+                if (firstTokenTimeMs == 0L) {
+                    firstTokenTimeMs = SystemClock.elapsedRealtime()
+                }
+                onPartial?.invoke(bytes.toString(Charsets.UTF_8))
+            }
             val run = {
                 LlamaNative.nativeInference(ptr, prompt.toByteArray(Charsets.UTF_8), maxTokens, temperature, topP, repeatPenalty, seed, listener)
             }
             val bytes = if (firstGenerationPending) LlamaNative.guarded(run).also { firstGenerationPending = false } else run()
-            Log.i(TAG, "Inference finished in ${SystemClock.elapsedRealtime() - startedAt} ms")
-            return bytes.toString(Charsets.UTF_8)
+            val totalMs = SystemClock.elapsedRealtime() - startedAt
+            val resultText = bytes.toString(Charsets.UTF_8)
+            val ttftMs = if (firstTokenTimeMs > 0L) firstTokenTimeMs - startedAt else totalMs
+            val decodeMs = if (firstTokenTimeMs > 0L) totalMs - ttftMs else totalMs
+            val generatedTokens = countTokens(resultText) ?: resultText.split("\\s+".toRegex()).size
+            val tps = if (decodeMs > 0) (generatedTokens * 1000.0) / decodeMs else 0.0
+            val modelFilename = loadedModelPath?.let { java.io.File(it).name } ?: "GGUF Model"
+
+            lastInferenceMetrics = InferenceMetrics(
+                modelName = modelFilename,
+                ttftMs = ttftMs,
+                decodeMs = decodeMs,
+                totalGenerationMs = totalMs,
+                generatedTokens = generatedTokens,
+                tokensPerSecond = tps
+            )
+
+            Log.i(TAG, "Inference finished in $totalMs ms (TTFT: ${ttftMs}ms, Decode: ${decodeMs}ms, Tokens: $generatedTokens, TPS: ${String.format(java.util.Locale.US, "%.2f", tps)})")
+            com.siddu.offlinedocai.ai.telemetry.BenchmarkTelemetry.logGeneration(
+                modelName = modelFilename,
+                contextSize = this.contextSize,
+                promptTokens = promptTokens,
+                generatedTokens = generatedTokens,
+                ttftMs = ttftMs,
+                decodeMs = decodeMs,
+                totalGenerationMs = totalMs,
+                tokensPerSecond = tps,
+                isCancelled = token.isCancelled
+            )
+            return resultText
         } catch (e: Throwable) {
             lastErrorMessage = "Local generation failed. The model remains installed, but the current generation could not be completed."
             throw IllegalStateException("Local generation failed: ${e.message}", e)

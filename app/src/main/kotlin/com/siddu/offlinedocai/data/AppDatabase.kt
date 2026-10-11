@@ -18,7 +18,7 @@ import com.siddu.offlinedocai.data.entities.MessageEntity
 
 @Database(
     entities = [DocumentEntity::class, ChunkEntity::class, ConversationEntity::class, MessageEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 @TypeConverters(Converters::class, FloatArrayConverter::class)
@@ -40,7 +40,8 @@ abstract class AppDatabase : RoomDatabase() {
         fun getInstance(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DB_NAME)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
                     .also { instance = it }
             }
@@ -114,6 +115,12 @@ abstract class AppDatabase : RoomDatabase() {
 
                 db.execSQL("DELETE FROM messages WHERE conversationId NOT IN (SELECT id FROM conversations)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_conversationId` ON `messages` (`conversationId`)")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN metrics TEXT")
             }
         }
     }

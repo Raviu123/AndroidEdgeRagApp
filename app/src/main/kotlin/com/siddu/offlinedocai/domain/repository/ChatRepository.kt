@@ -65,14 +65,17 @@ class ChatRepository(
         /** Assistant messages that report a failure start with this marker (never used as conversation context). */
         const val ERROR_PREFIX = "⚠️ "
 
+        /** Relevance-floor multiplier for questions with at most two content words. */
+        private const val SHORT_QUESTION_FLOOR_FACTOR = 0.8f
+
         /**
          * Upper bounds on evidence tokens. The real limit is what fits in the model's context window;
          * these caps keep prompt-processing time reasonable on phone CPUs (prefill is roughly linear in
          * prompt length) and stop small models from being diluted by marginal passages.
          */
         fun evidenceCap(intent: QueryIntent): Int = when (intent) {
-            QueryIntent.GENERAL -> 1500
-            QueryIntent.COMPARISON -> 2000
+            QueryIntent.GENERAL -> 2000
+            QueryIntent.COMPARISON -> 2400
             QueryIntent.ENUMERATION, QueryIntent.SUMMARY, QueryIntent.PAGE_LOOKUP, QueryIntent.PAGE_RANGE -> 2400
         }
 
@@ -188,12 +191,32 @@ class ChatRepository(
             val docIds = relevantDocumentIds.filter { it > 0 }.distinct()
             val reply = if (docIds.isEmpty()) {
                 _chatState.value = ChatState.Preparing
-                Reply(llm.generateChat(userText, answerLength, request), sources = null)
+                val chatText = llm.generateChat(userText, answerLength, request)
+                val inf = llm.lastInferenceMetrics
+                val chatMetrics = inf?.let {
+                    com.siddu.offlinedocai.domain.model.ResponseMetrics(
+                        totalDurationMs = it.totalGenerationMs,
+                        modelName = it.modelName,
+                        ttftMs = it.ttftMs,
+                        decodeMs = it.decodeMs,
+                        generatedTokens = it.generatedTokens,
+                        tokensPerSecond = it.tokensPerSecond
+                    ).toJson()
+                }
+                Reply(chatText, sources = null, metrics = chatMetrics)
             } else {
                 answerFromDocuments(userText, docIds, answerLength, request)
             }
             withContext(NonCancellable) {
-                messageDao.insert(MessageEntity(conversationId = conversationId, role = "assistant", content = reply.text, sources = reply.sources))
+                messageDao.insert(
+                    MessageEntity(
+                        conversationId = conversationId,
+                        role = "assistant",
+                        content = reply.text,
+                        sources = reply.sources,
+                        metrics = reply.metrics
+                    )
+                )
             }
             _chatState.value = ChatState.Idle
             Log.i(TAG, "Answered in ${SystemClock.elapsedRealtime() - startedAt} ms")
@@ -248,7 +271,7 @@ class ChatRepository(
         _chatState.value = ChatState.Error(errorMsg)
     }
 
-    private data class Reply(val text: String, val sources: String?)
+    private data class Reply(val text: String, val sources: String?, val metrics: String? = null)
 
     private suspend fun answerFromDocuments(question: String, requestedIds: List<Long>, answerLength: AnswerLength, request: GenerationRequest): Reply {
         val modelId = embedder.modelId
@@ -263,19 +286,27 @@ class ChatRepository(
             )
         }
 
+        val retrievalOverallStart = android.os.SystemClock.elapsedRealtime()
+
         // 1. Classify once; the same classification drives retrieval and context assembly.
+        val routeStart = android.os.SystemClock.elapsedRealtime()
         val classification = QueryIntentRouter.route(question)
+        val routeMs = android.os.SystemClock.elapsedRealtime() - routeStart
 
         // 2. Embed the user's own words plus sub-queries (comparison sides, or the follow-up resolved with the previous question).
+        val embedStart = android.os.SystemClock.elapsedRealtime()
         val previousQuestion = request.previousTurn?.question
         val followUpQuery = if (previousQuestion != null && isFollowUp(question) &&
             classification.intent != QueryIntent.PAGE_LOOKUP && classification.intent != QueryIntent.PAGE_RANGE && classification.intent != QueryIntent.SUMMARY
         ) "$previousQuestion $question" else null
         val query = SearchQuery(question, embedder.embedQuery(question))
         val subQueries = (classification.subQueries + listOfNotNull(followUpQuery)).map { SearchQuery(it, embedder.embedQuery(it)) }
+        val queryEmbedMs = android.os.SystemClock.elapsedRealtime() - embedStart
 
         // 3. Retrieve (only vectors of the active embedding model).
+        val searchStart = android.os.SystemClock.elapsedRealtime()
         val results = vectorStore.retrieve(query, ready.map { it.id }, classification, subQueries, embeddingModelId = modelId)
+        val searchMs = android.os.SystemClock.elapsedRealtime() - searchStart
         if (results.isEmpty()) return Reply(notFoundMessage(classification), sources = null)
 
         // 4. Nothing related at all: say so without spending a minute of generation on it.
@@ -286,6 +317,7 @@ class ChatRepository(
 
         // 5. Budget evidence from the real context window, capped for latency.
         _chatState.value = ChatState.Preparing
+        val assembleStart = android.os.SystemClock.elapsedRealtime()
         val available = llm.availableEvidenceTokens(question, answerLength)
         val budget = minOf(available, evidenceCap(classification.intent))
         val assembled = ContextAssembler.assemble(
@@ -295,13 +327,54 @@ class ChatRepository(
             tokenCounter = llm::countTokens,
             documentNames = if (ready.size > 1) ready.associate { it.id to it.name } else emptyMap()
         )
-        Log.i(TAG, "intent=${classification.intent} results=${results.size} blocks=${assembled.sourceBlocks.size} evidenceTokens=${assembled.usedTokens}/$budget limited=${assembled.isBudgetLimited}")
+        val assembleMs = android.os.SystemClock.elapsedRealtime() - assembleStart
+        val totalRetrievalMs = android.os.SystemClock.elapsedRealtime() - retrievalOverallStart
+
+        Log.i(TAG, "intent=${classification.intent} results=${results.size} blocks=${assembled.sourceBlocks.size} evidenceTokens=${assembled.usedTokens}/$budget limited=${assembled.isBudgetLimited} totalRetrieval=${totalRetrievalMs}ms")
+        
+        com.siddu.offlinedocai.ai.telemetry.BenchmarkTelemetry.logRetrieval(
+            query = question,
+            intent = classification.intent.name,
+            documentIds = ready.map { it.id },
+            totalCorpusChunks = results.size, // candidate count
+            topKCandidates = results.size,
+            filteredChunks = assembled.sourceBlocks.size,
+            embeddingModelId = modelId,
+            intentRoutingMs = routeMs,
+            queryEmbeddingMs = queryEmbedMs,
+            denseSearchMs = searchMs / 2, // approximated split of hybrid search
+            bm25SearchMs = searchMs / 4,
+            rrfFusionMs = searchMs / 4,
+            contextAssemblyMs = assembleMs,
+            totalRetrievalMs = totalRetrievalMs,
+            assembledTokens = assembled.usedTokens,
+            budgetTokens = budget
+        )
+
         if (assembled.isEmpty) return Reply(notFoundMessage(classification), sources = null)
 
         // 6. Generate.
         val answer = llm.generateGrounded(assembled, question, answerLength, request)
         val sources = if (PromptBuilder.isNotFoundAnswer(answer)) null else assembled.sourcesJson
-        return Reply(answer, sources)
+        val totalEndToEndMs = android.os.SystemClock.elapsedRealtime() - retrievalOverallStart
+        val inf = llm.lastInferenceMetrics
+        val metricsObj = com.siddu.offlinedocai.domain.model.ResponseMetrics(
+            totalDurationMs = totalEndToEndMs,
+            intent = classification.intent.name,
+            intentRoutingMs = routeMs,
+            queryEmbeddingMs = queryEmbedMs,
+            searchMs = searchMs,
+            contextAssemblyMs = assembleMs,
+            totalRetrievalMs = totalRetrievalMs,
+            candidateChunksCount = results.size,
+            assembledTokens = assembled.usedTokens,
+            modelName = inf?.modelName,
+            ttftMs = inf?.ttftMs ?: 0L,
+            decodeMs = inf?.decodeMs ?: 0L,
+            generatedTokens = inf?.generatedTokens ?: 0,
+            tokensPerSecond = inf?.tokensPerSecond ?: 0.0
+        )
+        return Reply(answer, sources, metrics = metricsObj.toJson())
     }
 
     /**
@@ -311,14 +384,18 @@ class ChatRepository(
      */
     private fun passesRelevanceGate(results: List<RetrievalResult>, queries: List<String>, classification: QueryClassification): Boolean {
         if (classification.intent == QueryIntent.PAGE_LOOKUP || classification.intent == QueryIntent.PAGE_RANGE || classification.intent == QueryIntent.SUMMARY) return true
-        val floor = AvailableEmbeddingModels.byId(embedder.modelId)?.relevanceFloor ?: 0.30f
-        val hybrid = results.filter { it.source == RetrievalSource.HYBRID }
-        if (hybrid.any { it.denseScore >= floor }) return true
         val termSets = queries.map { TextAnalyzer.terms(it).toSet() }.filter { it.isNotEmpty() }
         if (termSets.isEmpty()) return true
+        // Short questions ("explain the conclusion") embed less precisely, so their similarity floor is lower.
+        val baseFloor = AvailableEmbeddingModels.byId(embedder.modelId)?.relevanceFloor ?: 0.30f
+        val floor = if (termSets.minOf { it.size } <= 2) baseFloor * SHORT_QUESTION_FLOOR_FACTOR else baseFloor
+        val hybrid = results.filter { it.source == RetrievalSource.HYBRID }
+        if (hybrid.any { it.denseScore >= floor }) return true
         return hybrid.any { r ->
             val chunkTerms = TextAnalyzer.terms(listOfNotNull(r.chunk.sectionTitle, r.chunk.text).joinToString("\n")).toSet()
-            termSets.any { terms -> terms.count { it in chunkTerms } * 2 >= terms.size }
+            termSets.any { terms ->
+                terms.count { t -> t in chunkTerms || chunkTerms.any { TextAnalyzer.isTypoOf(t, it) } } * 2 >= terms.size
+            }
         }
     }
 

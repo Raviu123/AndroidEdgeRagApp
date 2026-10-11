@@ -50,4 +50,7 @@ interface LocalLLM {
 
     /** Stops whatever generation is currently running. Prefer cancelling a request's own token. */
     fun cancel() {}
+
+    /** Metrics from the most recent inference run. */
+    val lastInferenceMetrics: LlamaRunner.InferenceMetrics? get() = null
 }

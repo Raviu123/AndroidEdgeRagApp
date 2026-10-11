@@ -205,27 +205,34 @@ class DocumentRepository(
     private suspend fun runIndexing(original: DocumentEntity) {
         val name = original.name
         val doc = original.copy(status = STATUS_PROCESSING, errorMessage = null)
+        val ingestStart = android.os.SystemClock.elapsedRealtime()
         try {
             documentDao.update(doc)
 
             _importState.value = ImportState.Reading(name)
+            val extractStart = android.os.SystemClock.elapsedRealtime()
             val extracted = extract(doc)
+            val extractDuration = android.os.SystemClock.elapsedRealtime() - extractStart
             documentDao.update(doc.copy(pageCount = extracted.pageCount))
 
             _importState.value = ImportState.Chunking(name, extracted.pageCount)
+            val chunkStart = android.os.SystemClock.elapsedRealtime()
             val wordPiece = tokenizer()
             val chunks = TextChunker.chunkDocument(extracted.pages, tokenCounter = wordPiece::countTokens)
+            val chunkDuration = android.os.SystemClock.elapsedRealtime() - chunkStart
             if (chunks.isEmpty()) throw IllegalStateException("No text chunks could be produced from this document.")
 
             // One engine for the whole document, so every vector comes from the same model.
             val engine: EmbeddingModel = embeddings.currentEngine()
             val modelId = engine.modelId
             _importState.value = ImportState.Embedding(name, current = 0, total = chunks.size)
+            val embedStart = android.os.SystemClock.elapsedRealtime()
             val vectors = ArrayList<FloatArray>(chunks.size)
             for (batch in chunks.chunked(EMBED_BATCH)) {
                 vectors.addAll(engine.embedDocuments(batch.map(::embeddingInput)))
                 _importState.value = ImportState.Embedding(name, current = vectors.size, total = chunks.size)
             }
+            val embedDuration = android.os.SystemClock.elapsedRealtime() - embedStart
             val entities = chunks.mapIndexed { index, chunk ->
                 val vector = vectors[index]
                 ChunkEntity(
@@ -243,13 +250,31 @@ class DocumentRepository(
             }
 
             _importState.value = ImportState.Saving(name)
+            val dbStart = android.os.SystemClock.elapsedRealtime()
             if (documentDao.getById(doc.id) == null) return // deleted meanwhile
             chunkDao.replaceChunksForDocument(doc.id, entities)
             documentDao.update(
                 doc.copy(pageCount = extracted.pageCount, status = STATUS_COMPLETED, indexSignature = indexSignature(modelId), errorMessage = null)
             )
+            val dbDuration = android.os.SystemClock.elapsedRealtime() - dbStart
+            val totalIngestDuration = android.os.SystemClock.elapsedRealtime() - ingestStart
             _importState.value = ImportState.Completed(name)
-            Log.i(TAG, "Indexed '$name': ${extracted.pageCount} pages, ${entities.size} chunks with $modelId")
+            Log.i(TAG, "Indexed '$name': ${extracted.pageCount} pages, ${entities.size} chunks with $modelId in ${totalIngestDuration}ms")
+
+            val fileSize = doc.localPath?.let { runCatching { java.io.File(it).length() }.getOrDefault(0L) } ?: 0L
+            com.siddu.offlinedocai.ai.telemetry.BenchmarkTelemetry.logIngestion(
+                documentId = doc.id,
+                documentName = name,
+                fileSizeBytes = fileSize,
+                pageCount = extracted.pageCount,
+                chunkCount = entities.size,
+                embeddingModelId = modelId,
+                extractionMs = extractDuration,
+                chunkingMs = chunkDuration,
+                embeddingMs = embedDuration,
+                dbInsertMs = dbDuration,
+                totalIngestMs = totalIngestDuration
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: SourceUnavailableException) {

@@ -55,6 +55,8 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
         private const val CHAT_TEMPERATURE = 0.6f
         private const val TOP_P = 0.9f
         private const val REPEAT_PENALTY = 1.1f
+        /** Lighter for grounded answers: the required citation tags repeat by design and must not push the model to stop early. */
+        private const val GROUNDED_REPEAT_PENALTY = 1.03f
 
         const val MODEL_NOT_INSTALLED = "No language model is installed. Open Settings and download or import a model."
 
@@ -98,6 +100,9 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
 
     /** Path of the model file currently held in memory, if any. */
     fun loadedModelPath(): String? = llamaRunner.getLoadedModelPath()
+
+    override val lastInferenceMetrics: LlamaRunner.InferenceMetrics?
+        get() = llamaRunner.lastInferenceMetrics
 
     /** Refreshes the idle state after the active model changed (no loading). */
     fun onActiveModelChanged() {
@@ -168,10 +173,10 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
     fun maxNewTokens(length: AnswerLength): Int {
         val wanted = when (length) {
             AnswerLength.SHORT -> 192
-            AnswerLength.DEFAULT -> 448
-            AnswerLength.LONG -> 900
+            AnswerLength.DEFAULT -> 640
+            AnswerLength.LONG -> 1200
         }
-        return minOf(wanted, contextWindow() / 4)
+        return minOf(wanted, contextWindow() / 3)
     }
 
     /** Thinking budget for reasoning models (0 for normal instruct models). */
@@ -222,7 +227,7 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
                 prompt = render(PromptBuilder.groundedMessages(blocks, question, answerLength, isBudgetLimited = true, previousQuestion = previous))
             }
             // Grounded answers are decoded greedily: deterministic and least likely to drift from the sources.
-            val answer = runInference(prompt, maxNewTokens(answerLength), temperature = 0f, request = request)
+            val answer = runInference(prompt, maxNewTokens(answerLength), temperature = 0f, request = request, repeatPenalty = GROUNDED_REPEAT_PENALTY)
             PromptBuilder.sanitizeCitations(answer, blocks)
         }
     }
@@ -236,7 +241,13 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
         }
 
     /** Must be called with [modelMutex] held. */
-    private fun runInference(prompt: String, answerTokens: Int, temperature: Float, request: GenerationRequest): String {
+    private fun runInference(
+        prompt: String,
+        answerTokens: Int,
+        temperature: Float,
+        request: GenerationRequest,
+        repeatPenalty: Float = REPEAT_PENALTY
+    ): String {
         val token = request.token
         modelManager.setGenerating(true)
         try {
@@ -245,14 +256,14 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
                 { text: String -> cb(PromptBuilder.visibleAnswer(text, promptOpensThinking)) }
             }
             val budget = answerTokens + thinkingTokens()
-            var raw = llamaRunner.inference(prompt, budget, temperature, TOP_P, REPEAT_PENALTY, token, onPartial = partial)
+            var raw = llamaRunner.inference(prompt, budget, temperature, TOP_P, repeatPenalty, token, onPartial = partial)
             if (token.isCancelled) throw GenerationCancelledException(PromptBuilder.cleanOutput(raw, promptOpensThinking))
 
             // A reasoning model that ran out of budget while thinking: close the reasoning and ask for the answer.
             if (isReasoningModel && PromptBuilder.isStillThinking(raw, promptOpensThinking)) {
                 val forced = prompt + raw.trimEnd() + "\n</think>\n\n"
                 if (countPromptTokens(forced) + answerTokens <= contextWindow()) {
-                    val answer = llamaRunner.inference(forced, answerTokens, temperature, TOP_P, REPEAT_PENALTY, token, onPartial = request.onPartial)
+                    val answer = llamaRunner.inference(forced, answerTokens, temperature, TOP_P, repeatPenalty, token, onPartial = request.onPartial)
                     raw = raw.trimEnd() + "\n</think>\n\n" + answer
                 }
             }

@@ -102,7 +102,29 @@ object DocumentProcessor {
     }
 
     /**
-     * Extract text page‑by‑page from a PDF InputStream in a single O(N) pass.
+     * Data structures for spatial token and line layout reconstruction.
+     */
+    internal data class PositionedToken(
+        val text: String,
+        val xMin: Float,
+        val xMax: Float,
+        val yMin: Float,
+        val yMax: Float,
+        val fontSize: Float
+    )
+
+    private data class LineFragment(
+        val text: String,
+        val xMin: Float,
+        val xMax: Float,
+        val yMin: Float,
+        val yMax: Float,
+        val yBase: Float,
+        val fontSize: Float
+    )
+
+    /**
+     * Extract text page‑by‑page from a PDF InputStream with multi-column spatial layout analysis.
      */
     private fun extractPdf(inputStream: InputStream?, tempDir: java.io.File?): ExtractedDocument {
         if (inputStream == null) throw DocumentProcessingException.UriOpeningFailed("Cannot open InputStream for PDF")
@@ -116,38 +138,50 @@ object DocumentProcessor {
                     
                     val pages = mutableListOf<ExtractedPage>()
                     val stripper = object : PDFTextStripper() {
-                        private var currentPageText = StringBuilder()
+                        private var currentPageTokens = mutableListOf<PositionedToken>()
+                        private var currentPageFallbackText = StringBuilder()
                         private var currentPageNum = 1
 
                         override fun startPage(page: com.tom_roush.pdfbox.pdmodel.PDPage?) {
-                            currentPageText.clear()
+                            currentPageTokens.clear()
+                            currentPageFallbackText.clear()
                             currentPageNum = currentPageNo
                         }
 
                         override fun writeString(text: String?, textPositions: MutableList<com.tom_roush.pdfbox.text.TextPosition>?) {
-                            if (text != null) {
-                                currentPageText.append(text)
+                            if (text != null && text.isNotBlank()) {
+                                currentPageFallbackText.append(text).append(' ')
+                                if (!textPositions.isNullOrEmpty()) {
+                                    val xMin = textPositions.minOf { it.xDirAdj }
+                                    val xMax = textPositions.maxOf { it.xDirAdj + it.widthDirAdj }
+                                    val yMin = textPositions.minOf { it.yDirAdj - it.heightDir }
+                                    val yMax = textPositions.maxOf { it.yDirAdj }
+                                    val fontSize = textPositions.firstOrNull()?.fontSizeInPt ?: 10f
+                                    currentPageTokens.add(PositionedToken(text.trim(), xMin, xMax, yMin, yMax, fontSize))
+                                }
                             }
                         }
 
-                        // PDFBox emits inter-word gaps through writeWordSeparator(); without this override,
-                        // PDFs that position words instead of storing space glyphs come out as "Thequickbrownfox".
                         override fun writeWordSeparator() {
-                            currentPageText.append(' ')
+                            currentPageFallbackText.append(' ')
                         }
 
                         override fun writeLineSeparator() {
-                            currentPageText.append("\n")
+                            currentPageFallbackText.append("\n")
                         }
 
                         override fun writeParagraphSeparator() {
-                            currentPageText.append("\n\n")
+                            currentPageFallbackText.append("\n\n")
                         }
 
                         override fun endPage(page: com.tom_roush.pdfbox.pdmodel.PDPage?) {
-                            val trimmed = currentPageText.toString().replace("\r\n", "\n").replace(MULTI_SPACE, " ").trim()
-                            if (trimmed.isNotEmpty()) {
-                                pages.add(ExtractedPage(pageNumber = currentPageNum, text = trimmed))
+                            val extractedText = reconstructPageText(
+                                tokens = currentPageTokens,
+                                rawStreamText = currentPageFallbackText.toString()
+                            ).replace("\r\n", "\n").replace(MULTI_SPACE, " ").trim()
+
+                            if (extractedText.isNotEmpty()) {
+                                pages.add(ExtractedPage(pageNumber = currentPageNum, text = extractedText))
                             }
                         }
                     }
@@ -172,6 +206,216 @@ object DocumentProcessor {
             Log.e(TAG, "PDF extraction failed", e)
             throw DocumentProcessingException.PdfParsingFailed("Failed to parse PDF", e)
         }
+    }
+
+    /**
+     * Reconstructs page text in correct reading order by analyzing horizontal line baselines
+     * and detecting multi-column vertical gutters (e.g. 2-column papers and articles).
+     */
+    internal fun reconstructPageText(tokens: List<PositionedToken>, rawStreamText: String): String {
+        if (tokens.isEmpty()) return rawStreamText.trim()
+
+        // 1. Group tokens by baseline into visual line fragments
+        val sortedTokens = tokens.sortedWith(compareBy({ it.yMax }, { it.xMin }))
+        val lineFragments = mutableListOf<LineFragment>()
+        
+        var curTokens = mutableListOf<PositionedToken>()
+        var curYBase = -1f
+        var curFontSize = 10f
+
+        fun flushLine() {
+            if (curTokens.isEmpty()) return
+            val sorted = curTokens.sortedBy { it.xMin }
+            
+            // Subdivide line if there are large horizontal gaps (> 16pt, e.g. column margins)
+            val fragTokens = mutableListOf<PositionedToken>()
+            fun flushFrag() {
+                if (fragTokens.isEmpty()) return
+                val text = fragTokens.joinToString(" ") { it.text.trim() }.trim()
+                if (text.isNotEmpty()) {
+                    val xMin = fragTokens.minOf { it.xMin }
+                    val xMax = fragTokens.maxOf { it.xMax }
+                    val yMin = fragTokens.minOf { it.yMin }
+                    val yMax = fragTokens.maxOf { it.yMax }
+                    lineFragments.add(LineFragment(text, xMin, xMax, yMin, yMax, curYBase, curFontSize))
+                }
+                fragTokens.clear()
+            }
+
+            for (t in sorted) {
+                if (fragTokens.isNotEmpty()) {
+                    val gap = t.xMin - fragTokens.last().xMax
+                    if (gap > 16f) {
+                        flushFrag()
+                    }
+                }
+                fragTokens.add(t)
+            }
+            flushFrag()
+            curTokens.clear()
+        }
+
+        for (t in sortedTokens) {
+            if (curTokens.isEmpty()) {
+                curTokens.add(t)
+                curYBase = t.yMax
+                curFontSize = t.fontSize
+            } else {
+                val yDiff = kotlin.math.abs(t.yMax - curYBase)
+                val tolerance = kotlin.math.max(2.5f, curFontSize * 0.4f)
+                if (yDiff <= tolerance) {
+                    curTokens.add(t)
+                } else {
+                    flushLine()
+                    curTokens.add(t)
+                    curYBase = t.yMax
+                    curFontSize = t.fontSize
+                }
+            }
+        }
+        flushLine()
+
+        if (lineFragments.isEmpty()) return rawStreamText.trim()
+
+        // 2. Compute spatial bounding box of the page text
+        val pageMinX = lineFragments.minOf { it.xMin }
+        val pageMaxX = lineFragments.maxOf { it.xMax }
+        val pageWidth = pageMaxX - pageMinX
+
+        // If page is narrow or too few fragments, return simple vertical order
+        if (pageWidth < 120f || lineFragments.size < 6) {
+            return formatFragments(lineFragments.sortedWith(compareBy({ it.yBase }, { it.xMin })))
+        }
+
+        // 3. Multi-Column Gutter Detection
+        // Candidate gutter search window: middle 35% to 65% of the page text width
+        val gutterStart = pageMinX + pageWidth * 0.35f
+        val gutterEnd = pageMinX + pageWidth * 0.65f
+        
+        var bestGutterX = -1f
+        var minCrossing = Int.MAX_VALUE
+        var maxSeparation = -1
+
+        val steps = 30
+        val stepSize = (gutterEnd - gutterStart) / steps
+
+        for (step in 0..steps) {
+            val candidateX = gutterStart + step * stepSize
+            val gutterMargin = 8f
+            
+            var leftCount = 0
+            var rightCount = 0
+            var crossCount = 0
+
+            for (f in lineFragments) {
+                // If the fragment is full-width spanning (e.g. title/banner), don't count as crossing column noise
+                val isFullWidth = (f.xMax - f.xMin) > (pageWidth * 0.65f)
+                if (isFullWidth) continue
+
+                if (f.xMax < candidateX - gutterMargin) {
+                    leftCount++
+                } else if (f.xMin > candidateX + gutterMargin) {
+                    rightCount++
+                } else {
+                    crossCount++
+                }
+            }
+
+            val totalColFragments = leftCount + rightCount + crossCount
+            if (totalColFragments > 0) {
+                val minCol = minOf(leftCount, rightCount)
+                // A valid 2-column layout has significant content on both left and right (at least 15% each)
+                if (minCol >= totalColFragments * 0.15) {
+                    if (crossCount < minCrossing || (crossCount == minCrossing && minCol > maxSeparation)) {
+                        minCrossing = crossCount
+                        maxSeparation = minCol
+                        bestGutterX = candidateX
+                    }
+                }
+            }
+        }
+
+        val totalNonSpanning = lineFragments.count { (it.xMax - it.xMin) <= (pageWidth * 0.65f) }
+        val isTwoColumn = bestGutterX > 0f && minCrossing <= (totalNonSpanning * 0.10)
+
+        if (!isTwoColumn) {
+            // Single-column: sort top-to-bottom
+            return formatFragments(lineFragments.sortedWith(compareBy({ it.yBase }, { it.xMin })))
+        }
+
+        // 4. Partition into Top Spanning, Left Column, Right Column, Bottom Spanning
+        val gutterX = bestGutterX
+        val spanning = mutableListOf<LineFragment>()
+        val leftCol = mutableListOf<LineFragment>()
+        val rightCol = mutableListOf<LineFragment>()
+
+        for (f in lineFragments) {
+            val isFullSpan = (f.xMax - f.xMin) > (pageWidth * 0.65f) || (f.xMin < gutterX - 15f && f.xMax > gutterX + 15f)
+            if (isFullSpan) {
+                spanning.add(f)
+            } else {
+                val midX = (f.xMin + f.xMax) / 2f
+                if (midX < gutterX) {
+                    leftCol.add(f)
+                } else {
+                    rightCol.add(f)
+                }
+            }
+        }
+
+        // Determine column vertical boundaries
+        val colTopY = listOfNotNull(leftCol.minOfOrNull { it.yMin }, rightCol.minOfOrNull { it.yMin }).minOrNull() ?: 0f
+        val colBottomY = listOfNotNull(leftCol.maxOfOrNull { it.yMax }, rightCol.maxOfOrNull { it.yMax }).maxOrNull() ?: Float.MAX_VALUE
+
+        val topSpanning = spanning.filter { it.yMax <= colTopY + 10f }.sortedWith(compareBy({ it.yBase }, { it.xMin }))
+        val bottomSpanning = spanning.filter { it.yMin >= colBottomY - 10f }.sortedWith(compareBy({ it.yBase }, { it.xMin }))
+        val midSpanning = spanning.filter { it !in topSpanning && it !in bottomSpanning }.sortedWith(compareBy({ it.yBase }, { it.xMin }))
+
+        val leftSorted = leftCol.sortedWith(compareBy({ it.yBase }, { it.xMin }))
+        val rightSorted = rightCol.sortedWith(compareBy({ it.yBase }, { it.xMin }))
+
+        val resultBlocks = mutableListOf<String>()
+        if (topSpanning.isNotEmpty()) {
+            resultBlocks.add(formatFragments(topSpanning))
+        }
+        if (leftSorted.isNotEmpty()) {
+            resultBlocks.add(formatFragments(leftSorted))
+        }
+        if (rightSorted.isNotEmpty()) {
+            resultBlocks.add(formatFragments(rightSorted))
+        }
+        if (midSpanning.isNotEmpty()) {
+            resultBlocks.add(formatFragments(midSpanning))
+        }
+        if (bottomSpanning.isNotEmpty()) {
+            resultBlocks.add(formatFragments(bottomSpanning))
+        }
+
+        return resultBlocks.filter { it.isNotBlank() }.joinToString("\n\n")
+    }
+
+    private fun formatFragments(fragments: List<LineFragment>): String {
+        if (fragments.isEmpty()) return ""
+        val sb = StringBuilder()
+        var lastYBase = -1f
+        var lastHeight = 12f
+
+        for (f in fragments) {
+            if (sb.isNotEmpty()) {
+                val yGap = f.yBase - lastYBase
+                if (yGap > lastHeight * 1.6f) {
+                    sb.append("\n\n")
+                } else if (yGap > lastHeight * 0.4f) {
+                    sb.append("\n")
+                } else {
+                    sb.append(" ")
+                }
+            }
+            sb.append(f.text)
+            lastYBase = f.yBase
+            lastHeight = kotlin.math.max(8f, f.yMax - f.yMin)
+        }
+        return sb.toString().trim()
     }
 
     private val HEADING_STYLE = Regex("""(?i)^(heading\s*(\d)|title|subtitle)$""")

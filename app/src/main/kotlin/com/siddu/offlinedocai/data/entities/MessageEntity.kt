@@ -11,5 +11,6 @@ data class MessageEntity(
     val role: String, // "user" or "assistant"
     val content: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val sources: String? = null // JSON array of the source blocks the answer was generated from
+    val sources: String? = null, // JSON array of the source blocks the answer was generated from
+    val metrics: String? = null // JSON containing detailed latency & process breakdown
 )

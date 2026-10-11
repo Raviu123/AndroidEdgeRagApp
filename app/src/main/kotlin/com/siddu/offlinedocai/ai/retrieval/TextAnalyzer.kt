@@ -43,6 +43,55 @@ object TextAnalyzer {
             .filter { it !in STOPWORDS && (it.length > 1 || it[0].isDigit()) }
             .map { PorterStemmer.stem(it) }
             .toList()
+
+    /**
+     * True when stemmed term [a] is a likely misspelling of [b] ("reciev" / "receiv", "summeris" /
+     * "summaris"): same first letter, at least 5 letters, and at most 1 edit (2 for 8+ letters), where
+     * swapping two adjacent letters counts as one edit. Numbers never match fuzzily.
+     */
+    fun isTypoOf(a: String, b: String): Boolean {
+        if (a == b) return true
+        val shorter = minOf(a.length, b.length)
+        if (shorter < 5 || a[0] != b[0] || a.any(Char::isDigit) || b.any(Char::isDigit)) return false
+        val allowed = if (shorter >= 8) 2 else 1
+        if (kotlin.math.abs(a.length - b.length) > allowed) return false
+        return editDistance(a, b, allowed) <= allowed
+    }
+
+    /**
+     * Maps each query term that never occurs in the indexed text to its closest typo match in
+     * [docFreq] (most frequent wins on ties). Terms that do occur, or have no close match, are kept.
+     */
+    fun correctTerms(queryTerms: List<String>, docFreq: Map<String, Int>): List<String> =
+        queryTerms.map { term ->
+            if (term in docFreq || term.length < 5) term
+            else docFreq.entries
+                .filter { (candidate, _) -> isTypoOf(term, candidate) }
+                .minWithOrNull(compareBy<Map.Entry<String, Int>> { editDistance(term, it.key, 2) }.thenByDescending { it.value })
+                ?.key ?: term
+        }.distinct()
+
+    /** Optimal-string-alignment distance (adjacent transposition = 1), stopping early above [limit]. */
+    private fun editDistance(a: String, b: String, limit: Int): Int {
+        var prevPrev = IntArray(b.length + 1)
+        var prev = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val cur = IntArray(b.length + 1)
+            cur[0] = i
+            var rowMin = cur[0]
+            for (j in 1..b.length) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                var d = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) d = minOf(d, prevPrev[j - 2] + 1)
+                cur[j] = d
+                rowMin = minOf(rowMin, d)
+            }
+            if (rowMin > limit) return limit + 1
+            prevPrev = prev
+            prev = cur
+        }
+        return prev[b.length]
+    }
 }
 
 /**

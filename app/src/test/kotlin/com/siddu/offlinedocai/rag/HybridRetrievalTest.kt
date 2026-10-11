@@ -5,6 +5,7 @@ import com.siddu.offlinedocai.ai.retrieval.QueryIntent
 import com.siddu.offlinedocai.ai.retrieval.QueryIntentRouter
 import com.siddu.offlinedocai.ai.retrieval.RetrievalSource
 import com.siddu.offlinedocai.ai.retrieval.SearchQuery
+import com.siddu.offlinedocai.ai.retrieval.TextAnalyzer
 import com.siddu.offlinedocai.ai.retrieval.VectorStore
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -73,6 +74,25 @@ class HybridRetrievalTest {
         // A deliberately uninformative embedding: only lexical evidence can find the answer.
         val results = store.retrieve(SearchQuery(q, TestVectors.topic(COOKING to 0.05f, INTEREST to 1f)), listOf(2L), classify(q))
         assertEquals(11L, results.first().chunk.id)
+    }
+
+    @Test
+    fun misspelledTermsStillMatchThroughBm25() = runBlocking {
+        val (store, _) = store()
+        val q = "endpiont"
+        // Uninformative embedding: only the typo-corrected keyword ("endpoint") can find chunk 11.
+        val results = store.retrieve(SearchQuery(q, TestVectors.topic(250 to 1f)), listOf(2L), QueryClassification(QueryIntent.GENERAL, q))
+        assertEquals(11L, results.first().chunk.id)
+    }
+
+    @Test
+    fun typoMatchingIsConservative() {
+        assertTrue(TextAnalyzer.isTypoOf("reciev", "receiv"))   // transposition
+        assertTrue(TextAnalyzer.isTypoOf("summeris", "summaris"))
+        assertFalse(TextAnalyzer.isTypoOf("rate", "late"))      // too short to guess
+        assertFalse(TextAnalyzer.isTypoOf("model", "hotel"))    // different first letter
+        assertFalse(TextAnalyzer.isTypoOf("budget", "bucket")) // two edits on a short word
+        assertFalse(TextAnalyzer.isTypoOf("2023", "2024"))      // numbers are exact
     }
 
     @Test

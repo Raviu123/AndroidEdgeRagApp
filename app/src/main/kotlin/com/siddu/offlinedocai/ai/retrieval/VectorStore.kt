@@ -35,7 +35,8 @@ data class SearchQuery(val text: String, val embedding: FloatArray)
  * Document-agnostic hybrid retriever.
  *
  *  - Dense: cosine similarity between the query embedding and every chunk embedding -> top [DENSE_K].
- *  - Lexical: Okapi BM25 over stemmed terms ([TextAnalyzer]) -> top [BM25_K].
+ *  - Lexical: Okapi BM25 over stemmed terms ([TextAnalyzer]) -> top [BM25_K]. Query terms absent
+ *    from the index are typo-corrected to the closest indexed term first.
  *  - Fusion: Reciprocal Rank Fusion (k = 60) across every ranked list (one dense + one BM25 list per query).
  *  - A candidate must show *some* evidence (dense >= [MIN_DENSE] or a BM25 hit) to survive.
  *  - Neighbouring chunks of the best hits are appended (lower priority) to restore surrounding context.
@@ -119,7 +120,8 @@ class VectorStore(private val chunkDao: ChunkDao) {
 
         for (query in queries) {
             val dense = FloatArray(n) { i -> chunks[i].embedding?.let { cosine(query.embedding, it) } ?: -1f }
-            val queryTerms = TextAnalyzer.terms(query.text).distinct()
+            // Misspelled words that never occur in the documents are mapped to their closest indexed term.
+            val queryTerms = TextAnalyzer.correctTerms(TextAnalyzer.terms(query.text).distinct(), docFreq)
             val bm25 = FloatArray(n) { i -> bm25(chunks[i], queryTerms, docFreq, n, avgLength).toFloat() }
 
             for (i in 0 until n) {

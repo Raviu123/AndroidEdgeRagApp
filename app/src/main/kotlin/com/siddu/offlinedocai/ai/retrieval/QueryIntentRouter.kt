@@ -57,6 +57,26 @@ object QueryIntentRouter {
         """(?i)^\s*(?:please\s+)?(?:summari[sz]e|give\s+(?:me\s+)?(?:a|an)\s+(?:summary|overview)|provide\s+(?:a|an)\s+(?:summary|overview)|tl;?dr)\b(?:\s+(?:of\s+)?(?:this|the|my)?\s*(?:document|file|pdf|book|paper|report|text|it))?\s*[?.!]*$|\bwhat\s+(?:is|'s)\s+(?:this|the)\s+(?:document|file|pdf|book|paper|report)\s+about\b|\b(?:main|key)\s+(?:points|ideas|takeaways|topics|findings)\s+(?:of|in|from)\s+(?:this|the)\s+(?:document|file|pdf|book|paper|report)\b|^\s*(?:summary|overview|tl;?dr)\s*[?.!]*$"""
     )
 
+    /**
+     * "Summarize" / "summary" including common misspellings (summerise, sumarize, summery, sumary),
+     * plus overview-style words. Used with [isWholeDocumentRequest] to catch free-form phrasings.
+     */
+    private val SUMMARY_WORD = Regex(
+        """(?i)\bsumm?[aeiu]r+(?:[iy][sz](?:e|es|ed|ing|ation)?|y|ies)\b|\b(?:overview|synopsis|gist|recap|tl\s*;?\s*dr)\b"""
+    )
+
+    /** Words that only shape a summary request (length, format, politeness, the document itself). */
+    private val SUMMARY_FILLER = setOf(
+        "paper", "report", "book", "text", "article", "content", "contents", "attached", "uploaded", "selected",
+        "given", "provided", "whole", "entire", "full", "complete", "overall", "brief", "briefly", "short", "shortly",
+        "quick", "quickly", "simple", "simply", "detail", "details", "detailed", "detailedly", "elaborate", "proper",
+        "properly", "nice", "good", "clear", "clearly", "word", "words", "line", "lines", "sentence", "sentences",
+        "paragraph", "paragraphs", "point", "points", "pointwise", "bullet", "bullets", "key", "main", "important",
+        "want", "need", "help", "provide", "write", "make", "create", "get", "kindly", "pls", "plz", "us",
+        "one", "two", "three", "four", "five", "ten", "few", "within", "format", "form", "way", "manner", "language",
+        "english", "easy", "understand", "everything", "summary", "doc", "docs"
+    )
+
     private val ENUMERATION = Regex(
         """(?i)^\s*(?:please\s+)?(?:list|enumerate|name)\b|\b(?:list|name|enumerate)\s+(?:all|every|each)\b|\bwhat\s+are\s+(?:all\s+)?(?:the\s+)?(?:different\s+|various\s+|main\s+|key\s+)?[\p{L}\- ]{2,40}?s\b(?!\s+(?:of|in)\s+(?:the|this)\s+\w+\s+(?:about|for))|\b(?:all|every)\s+(?:the\s+)?[\p{L}\-]+s?\s+(?:mentioned|listed|described|discussed)\b|\b(?:types|kinds|steps|stages|phases|categories|examples)\s+of\b|\bwhat\s+steps\b|\bhow\s+many\b"""
     )
@@ -79,7 +99,7 @@ object QueryIntentRouter {
             }
         }
 
-        if (DOCUMENT_SUMMARY.containsMatchIn(q)) {
+        if (DOCUMENT_SUMMARY.containsMatchIn(q) || isWholeDocumentRequest(q)) {
             return QueryClassification(QueryIntent.SUMMARY, q)
         }
 
@@ -95,6 +115,16 @@ object QueryIntentRouter {
         }
 
         return QueryClassification(QueryIntent.GENERAL, q)
+    }
+
+    /**
+     * True when the question asks for a summary and names no topic: "can you summerise this pdf in
+     * 5 points" is a whole-document summary, "summarize the section on interest rates" is not.
+     */
+    private fun isWholeDocumentRequest(q: String): Boolean {
+        if (!SUMMARY_WORD.containsMatchIn(q)) return false
+        val remainder = TextAnalyzer.tokens(SUMMARY_WORD.replace(q, " "))
+        return remainder.none { it.length > 1 && !it.all(Char::isDigit) && it !in TextAnalyzer.STOPWORDS && it !in SUMMARY_FILLER }
     }
 
     private fun cleanEntity(raw: String): String =

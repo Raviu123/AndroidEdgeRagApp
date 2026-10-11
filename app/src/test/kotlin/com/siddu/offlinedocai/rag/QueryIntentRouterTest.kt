@@ -32,6 +32,18 @@ class QueryIntentRouterTest {
     }
 
     @Test
+    fun freeFormAndMisspelledSummaryRequests() {
+        listOf(
+            "summerise this pdf", "summery", "sumarize the document", "Can you summarize this pdf?",
+            "summary of this pdf", "Summarize this pdf in detail", "summarise the paper in 5 points",
+            "give me summary", "please give a brief overview of the whole report", "tldr"
+        ).forEach { assertEquals(it, QueryIntent.SUMMARY, intent(it)) }
+        // Still topical, so still a search.
+        listOf("summerise the methodology", "Can you summarize the refund policy?", "summary of chapter 3 results")
+            .forEach { assertEquals(it, QueryIntent.GENERAL, intent(it)) }
+    }
+
+    @Test
     fun comparisons() {
         val c = QueryIntentRouter.route("What is the difference between a Roth IRA and a traditional IRA?")
         assertEquals(QueryIntent.COMPARISON, c.intent)

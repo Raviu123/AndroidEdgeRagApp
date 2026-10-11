@@ -1145,7 +1145,15 @@ fun ChatScreen(
                         if (isUser) {
                             UserMessageBubble(text = msg.content)
                         } else {
-                            AssistantMessageItem(text = msg.content)
+                            val msgIndex = messages.indexOf(msg)
+                            val userQuestion = if (msgIndex > 0 && messages[msgIndex - 1].role.equals("user", ignoreCase = true)) {
+                                messages[msgIndex - 1].content
+                            } else null
+                            AssistantMessageItem(
+                                text = msg.content,
+                                metricsJson = msg.metrics,
+                                userQuestion = userQuestion
+                            )
                         }
                     }
 
@@ -1280,7 +1288,12 @@ fun UserMessageBubble(text: String) {
 }
 
 @Composable
-fun AssistantMessageItem(text: String) {
+fun AssistantMessageItem(
+    text: String,
+    metricsJson: String? = null,
+    userQuestion: String? = null
+) {
+    val metrics = remember(metricsJson) { com.siddu.offlinedocai.domain.model.ResponseMetrics.fromJson(metricsJson) }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start
@@ -1301,11 +1314,20 @@ fun AssistantMessageItem(text: String) {
             )
         }
         Spacer(modifier = Modifier.width(10.dp))
-        MarkdownMessage(
-            text = text,
-            modifier = Modifier.weight(1f),
-            isAssistant = true
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            MarkdownMessage(
+                text = text,
+                modifier = Modifier.fillMaxWidth(),
+                isAssistant = true
+            )
+            if (metrics != null) {
+                com.siddu.offlinedocai.ui.components.ResponseMetricsDropdown(
+                    metrics = metrics,
+                    userQuestion = userQuestion,
+                    assistantAnswer = text
+                )
+            }
+        }
     }
 }
 
