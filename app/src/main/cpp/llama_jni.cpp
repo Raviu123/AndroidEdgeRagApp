@@ -502,6 +502,12 @@ JNI_FN(nativeInference)(JNIEnv *env, jclass, jlong handle, jbyteArray prompt_byt
     llama_sampler *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
     if (repeat_penalty > 1.0f) {
         llama_sampler_chain_add(smpl, llama_sampler_init_penalties(llama_vocab_n_tokens(vocab), 64, repeat_penalty, 0.0f, 0.0f));
+        // DRY: penalises continuing a token sequence the answer has already written (only generated
+        // tokens are accepted into its history, so copying phrases from the prompt is not penalised).
+        // Repeats up to 4 tokens are free (names, terms); longer ones get exponentially less likely,
+        // which breaks the sentence/list-item loops small models fall into.
+        static const char *dry_breakers[] = {"\n", ":", "\"", "*"};
+        llama_sampler_chain_add(smpl, llama_sampler_init_dry(vocab, 0.6f, 1.75f, 4, 512, dry_breakers, 4));
     }
     if (temperature <= 0.0f) {
         llama_sampler_chain_add(smpl, llama_sampler_init_greedy());

@@ -22,37 +22,58 @@ object PromptBuilder {
         AnswerLength.LONG -> "Give a detailed, comprehensive answer that covers every relevant point and explains each one fully. Organise it with bullet points, numbered steps or short headings where they help."
     }
 
-    fun groundedSystemPrompt(length: AnswerLength, isBudgetLimited: Boolean, isSubOneBillion: Boolean = false): String = buildString {
-        if (isSubOneBillion) {
+    /**
+     * Tiny models copy whichever passage reads most fluently and pad answers that are asked to be long,
+     * so they get a short answer target, no citation duty and explicit "ignore unrelated sources" /
+     * "say what is not covered" rules instead.
+     */
+    private fun tinyLengthInstruction(length: AnswerLength): String = when (length) {
+        AnswerLength.SHORT -> "Be brief: answer in one to three sentences."
+        AnswerLength.DEFAULT -> "Answer in one short paragraph of three to six sentences, or a short list when the question asks for several items."
+        AnswerLength.LONG -> "Give a detailed answer of up to three paragraphs, or a list with one or two sentences per item."
+    }
+
+    fun groundedSystemPrompt(length: AnswerLength, isBudgetLimited: Boolean, tier: ModelTier = ModelTier.STANDARD): String = buildString {
+        if (tier == ModelTier.TINY) {
             append("You answer questions using only the sources provided by the user.\n")
-            append("Instructions:\n")
-            append("- Use facts from the sources. Do not guess.\n")
-            append("- If the sources do not contain the answer, reply: \"$NOT_FOUND_ANSWER\"\n")
-            append("- ").append(lengthInstruction(length)).append("\n")
-            append("- Explain the answer clearly using complete thoughts. Do not reply with single-line or tautological summaries.")
+            append("Rules:\n")
+            append("- Answer exactly the question that is asked, using only facts written in the sources. Do not guess or add outside knowledge.\n")
+            append("- Some sources may be about other topics. Use only the sources that are about the question and ignore the rest.\n")
+            append("- If the sources do not contain the answer, reply exactly: \"$NOT_FOUND_ANSWER\"\n")
+            append("- If the sources answer only part of the question, answer that part and say which part the document does not cover.\n")
+            append("- Say each point once. Do not repeat sentences.\n")
+            append("- ").append(tinyLengthInstruction(length))
         } else {
             append("You answer questions using only the numbered sources provided by the user.\n")
             append("Rules:\n")
             append("- Use only information stated in the sources. Do not use outside knowledge and do not guess.\n")
+            append("- Some sources may be about other topics; use only the ones that answer the question.\n")
             append("- After each statement, cite the source it came from by copying its tag exactly, for example [Source 2, Page 7].\n")
             append("- If the sources do not contain the answer, reply exactly: \"$NOT_FOUND_ANSWER\"\n")
             append("- If the sources answer only part of the question, answer that part and say what is not covered.\n")
             append("- Copy numbers, names, dates, units and quotations exactly as they appear in the sources.\n")
             if (isBudgetLimited) append("- Not every relevant passage could be shown, so do not claim that a list or answer is complete.\n")
+            append("- Say each point once; do not repeat sentences.\n")
             append("- ").append(lengthInstruction(length))
         }
     }
 
+    /**
+     * The question is stated before the sources (so the model reads them with the question in mind) and
+     * again at the end (where it answers from). Small models stay on topic noticeably better this way.
+     */
     fun groundedMessages(
         blocks: List<SourceBlock>,
         question: String,
         length: AnswerLength,
         isBudgetLimited: Boolean = false,
         previousQuestion: String? = null,
-        isSubOneBillion: Boolean = false
+        tier: ModelTier = ModelTier.STANDARD
     ): List<ChatMessage> {
         val sources = blocks.joinToString("\n\n") { sanitizeUntrusted(it.format()) }
+        val cleanQuestion = sanitizeUntrusted(question.trim())
         val user = buildString {
+            append("Question to answer: ").append(cleanQuestion).append("\n\n")
             append("Sources:\n\n")
             append(sources.ifBlank { "(no sources)" })
             if (!previousQuestion.isNullOrBlank()) {
@@ -61,10 +82,10 @@ object PromptBuilder {
                 append("\")")
             }
             append("\n\nQuestion: ")
-            append(sanitizeUntrusted(question.trim()))
+            append(cleanQuestion)
         }
         return listOf(
-            ChatMessage("system", groundedSystemPrompt(length, isBudgetLimited, isSubOneBillion)),
+            ChatMessage("system", groundedSystemPrompt(length, isBudgetLimited, tier)),
             ChatMessage("user", user)
         )
     }

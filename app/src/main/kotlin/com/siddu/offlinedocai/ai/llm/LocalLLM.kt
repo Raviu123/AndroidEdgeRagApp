@@ -17,7 +17,10 @@ class GenerationRequest(
     val onStarted: (() -> Unit)? = null,
     val onPartial: ((String) -> Unit)? = null,
     val previousTurn: ChatTurn? = null
-)
+) {
+    /** The same request with a different (or no) previous turn. */
+    fun withPreviousTurn(turn: ChatTurn?) = GenerationRequest(token, onStarted, onPartial, turn)
+}
 
 /**
  * On-device language model used by the chat pipeline. Inputs are structured (evidence blocks and
@@ -50,6 +53,9 @@ interface LocalLLM {
 
     /** Stops whatever generation is currently running. Prefer cancelling a request's own token. */
     fun cancel() {}
+
+    /** Size class of the loaded model; decides how much evidence it is shown. */
+    val modelTier: ModelTier get() = ModelTier.STANDARD
 
     /** Metrics from the most recent inference run. */
     val lastInferenceMetrics: LlamaRunner.InferenceMetrics? get() = null

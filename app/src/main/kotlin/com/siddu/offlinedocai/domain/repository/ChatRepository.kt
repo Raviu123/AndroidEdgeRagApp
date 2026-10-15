@@ -13,6 +13,7 @@ import com.siddu.offlinedocai.ai.llm.GenerationCancelledException
 import com.siddu.offlinedocai.ai.llm.GenerationRequest
 import com.siddu.offlinedocai.ai.llm.GenerationToken
 import com.siddu.offlinedocai.ai.llm.LocalLLM
+import com.siddu.offlinedocai.ai.llm.ModelTier
 import com.siddu.offlinedocai.ai.llm.PromptBuilder
 import com.siddu.offlinedocai.ai.retrieval.ContextAssembler
 import com.siddu.offlinedocai.ai.retrieval.QueryClassification
@@ -71,22 +72,30 @@ class ChatRepository(
         /**
          * Upper bounds on evidence tokens. The real limit is what fits in the model's context window;
          * these caps keep prompt-processing time reasonable on phone CPUs (prefill is roughly linear in
-         * prompt length) and stop small models from being diluted by marginal passages.
+         * prompt length) and stop small models from being diluted by marginal passages: a 0.5B model
+         * answers best from a handful of passages and copies off-topic ones when shown a dozen.
          */
-        fun evidenceCap(intent: QueryIntent): Int = when (intent) {
-            QueryIntent.GENERAL -> 2000
-            QueryIntent.COMPARISON -> 2400
-            QueryIntent.ENUMERATION, QueryIntent.SUMMARY, QueryIntent.PAGE_LOOKUP, QueryIntent.PAGE_RANGE -> 2400
+        fun evidenceCap(intent: QueryIntent, tier: ModelTier = ModelTier.STANDARD): Int {
+            val focused = intent == QueryIntent.GENERAL
+            return when (tier) {
+                ModelTier.TINY -> if (focused) 900 else 1300
+                ModelTier.SMALL -> if (focused) 1300 else 1700
+                ModelTier.STANDARD -> if (focused) 2000 else 2400
+            }
         }
 
-        private val FOLLOW_UP_START = Regex("""(?i)^\s*(and|but|also|then|so|what about|how about|why|explain (that|this|more|further)|tell me more|more on|elaborate|continue|ok(ay)?,?)\b""")
+        private val FOLLOW_UP_START = Regex("""(?i)^\s*(and|but|also|then|so|what about|how about|explain (that|this|more|further)|tell me more|more on|elaborate|continue|ok(ay)?,?)\b""")
+        /** "Why?" / "Why is that?" refer back; "Why should apps validate input?" is a new question. */
+        private val SHORT_WHY = Regex("""(?i)^\s*why\b""")
         private val FOLLOW_UP_PRONOUN = Regex("""(?i)\b(it|its|they|them|their|this|that|these|those|he|she|his|her|there|the (first|second|third|last|former|latter|above|same) (one|ones|point|item|step)?)\b""")
 
         /** Short or pronoun-led questions usually depend on the previous question for their subject. */
         fun isFollowUp(question: String): Boolean {
             val words = question.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
             if (words.isEmpty()) return false
-            return FOLLOW_UP_START.containsMatchIn(question) || (words.size <= 8 && FOLLOW_UP_PRONOUN.containsMatchIn(question))
+            return FOLLOW_UP_START.containsMatchIn(question) ||
+                (words.size <= 4 && SHORT_WHY.containsMatchIn(question)) ||
+                (words.size <= 8 && FOLLOW_UP_PRONOUN.containsMatchIn(question))
         }
     }
 
@@ -307,7 +316,8 @@ class ChatRepository(
         // 2. Embed the user's own words plus sub-queries (comparison sides, or the follow-up resolved with the previous question).
         val embedStart = android.os.SystemClock.elapsedRealtime()
         val previousQuestion = request.previousTurn?.question
-        val followUpQuery = if (previousQuestion != null && isFollowUp(question) &&
+        val followsUp = previousQuestion != null && isFollowUp(question)
+        val followUpQuery = if (followsUp &&
             classification.intent != QueryIntent.PAGE_LOOKUP && classification.intent != QueryIntent.PAGE_RANGE && classification.intent != QueryIntent.SUMMARY
         ) "$previousQuestion $question" else null
         val query = SearchQuery(question, embedder.embedQuery(question))
@@ -330,7 +340,7 @@ class ChatRepository(
         _chatState.value = ChatState.Preparing
         val assembleStart = android.os.SystemClock.elapsedRealtime()
         val available = llm.availableEvidenceTokens(question, answerLength)
-        val budget = minOf(available, evidenceCap(classification.intent))
+        val budget = minOf(available, evidenceCap(classification.intent, llm.modelTier))
         val assembled = ContextAssembler.assemble(
             results = results,
             classification = classification,
@@ -365,7 +375,9 @@ class ChatRepository(
         if (assembled.isEmpty) return Reply(notFoundMessage(classification), sources = null)
 
         // 6. Generate.
-        val answer = llm.generateGrounded(assembled, question, answerLength, request)
+        // An unrelated earlier question must not reach the prompt: it pulls the answer off topic.
+        val generationRequest = if (followsUp) request else request.withPreviousTurn(null)
+        val answer = llm.generateGrounded(assembled, question, answerLength, generationRequest)
         val sources = if (PromptBuilder.isNotFoundAnswer(answer)) null else assembled.sourcesJson
         val totalEndToEndMs = android.os.SystemClock.elapsedRealtime() - retrievalOverallStart
         val budgetInfo = llm.lastBudgetInfo

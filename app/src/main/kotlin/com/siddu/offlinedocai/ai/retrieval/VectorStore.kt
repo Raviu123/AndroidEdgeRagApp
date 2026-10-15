@@ -162,8 +162,8 @@ class VectorStore(private val chunkDao: ChunkDao) {
             val tf = chunk.termFreq[term] ?: continue
             val df = docFreq[term] ?: continue
             val idf = max(0.0, ln(1.0 + (n - df + 0.5) / (df + 0.5)))
-            // Quadratic IDF scaling emphasizes rare discriminative keywords (e.g. "network", "keys", "session")
-            // over generic document vocabulary ("data", "protecting")
+            // Quadratic IDF scaling emphasizes rare, discriminative query terms over vocabulary that
+            // appears throughout the document.
             val queryWeight = idf * idf
             val tfWeight = (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * (1 - BM25_B + BM25_B * chunk.length / avgLength))
             score += queryWeight * tfWeight

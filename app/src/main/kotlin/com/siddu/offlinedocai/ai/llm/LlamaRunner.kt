@@ -329,6 +329,16 @@ class LlamaRunner(context: Context) {
     }
 
     /** Stops the generation that is currently running, whichever request it belongs to. */
+    /**
+     * Ends the running generation now but keeps its text: unlike [cancelInference] the request is not
+     * cancelled (used when the answer has started looping). The flag is reset by the next request.
+     */
+    fun finishEarly() {
+        synchronized(handleLock) {
+            if (isNativeLoaded && handle != 0L) LlamaNative.nativeCancel(handle)
+        }
+    }
+
     fun cancelInference() {
         activeToken?.cancel() ?: synchronized(handleLock) {
             if (isNativeLoaded && handle != 0L) LlamaNative.nativeCancel(handle)

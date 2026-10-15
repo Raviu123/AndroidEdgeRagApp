@@ -95,6 +95,8 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
     @Volatile private var hasNativeTemplate = false
     @Volatile private var isReasoningModel = false
     @Volatile private var promptOpensThinking = false
+    @Volatile private var tier: ModelTier = ModelTier.STANDARD
+    override val modelTier: ModelTier get() = tier
 
     private val _loadState = MutableStateFlow<LlmLoadState>(LlmLoadState.NoModel)
     val loadState: StateFlow<LlmLoadState> = _loadState.asStateFlow()
@@ -208,9 +210,10 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
         hasNativeTemplate = llamaRunner.applyChatTemplate(listOf(ChatMessage("user", "ping"))) != null
         isReasoningModel = PromptBuilder.isReasoningModel(template, modelName + " " + file.name)
         promptOpensThinking = isReasoningModel && render(listOf(ChatMessage("user", "ping"))).trimEnd().endsWith("<think>")
+        tier = ModelTier.detect(llamaRunner.metadata("general.parameter_count"), llamaRunner.metadata("general.size_label"), "$modelName ${file.name}")
         lastPrompt = ""
         publishReady()
-        Log.i(TAG, "Model ready: ${file.name} arch=$architecture n_ctx=${llamaRunner.contextSize} nativeTemplate=$hasNativeTemplate family=$templateFamily reasoning=$isReasoningModel ${performanceLabel()}")
+        Log.i(TAG, "Model ready: ${file.name} arch=$architecture n_ctx=${llamaRunner.contextSize} nativeTemplate=$hasNativeTemplate family=$templateFamily reasoning=$isReasoningModel tier=$tier ${performanceLabel()}")
     }
 
     private fun chooseContextSize(): Int {
@@ -223,10 +226,11 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
 
     /** Tokens of the visible answer. */
     fun maxNewTokens(length: AnswerLength): Int {
+        // Small models pad and loop when given room they do not need, so their allowance is tighter.
         val wanted = when (length) {
             AnswerLength.SHORT -> 192
-            AnswerLength.DEFAULT -> 640
-            AnswerLength.LONG -> 1200
+            AnswerLength.DEFAULT -> when (tier) { ModelTier.TINY -> 400; ModelTier.SMALL -> 512; ModelTier.STANDARD -> 640 }
+            AnswerLength.LONG -> when (tier) { ModelTier.TINY -> 800; ModelTier.SMALL -> 1000; ModelTier.STANDARD -> 1200 }
         }
         return minOf(wanted, contextWindow() / 3)
     }
@@ -257,12 +261,6 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
     private fun countPromptTokens(prompt: String): Int =
         llamaRunner.countTokens(prompt, isPrompt = true) ?: ContextAssembler.estimateTokens(prompt)
 
-    private fun isSubOneBillionModel(): Boolean {
-        val file = activeModelFile() ?: return false
-        val modelName = (llamaRunner.metadata("general.name") ?: file.name).lowercase()
-        return "0.5b" in modelName || "500m" in modelName || "350m" in modelName || "0.6b" in modelName
-    }
-
     /**
      * Evidence tokens for the next grounded prompt: what fits in the context window, further capped so
      * that prompt processing fits this device's measured speed and the [SpeedMode] target.
@@ -271,8 +269,7 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
         preempt()
         modelMutex.withLock {
             ensureLoaded()
-            val isSub1B = isSubOneBillionModel()
-            val skeleton = render(PromptBuilder.groundedMessages(emptyList(), question, answerLength, isBudgetLimited = true, isSubOneBillion = isSub1B))
+            val skeleton = render(PromptBuilder.groundedMessages(emptyList(), question, answerLength, isBudgetLimited = true, tier = tier))
             val overhead = countPromptTokens(skeleton)
             val fit = (contextWindow() - overhead - maxNewTokens(answerLength) - thinkingTokens() - SAFETY_MARGIN_TOKENS).coerceAtLeast(0)
 
@@ -305,14 +302,14 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
         modelMutex.withLock {
             ensureLoaded()
             val maxNew = maxNewTokens(answerLength) + thinkingTokens()
+            // The caller only passes a previous turn when this question is a follow-up of it.
             val previous = request.previousTurn?.question
-            val isSub1B = isSubOneBillionModel()
             var blocks = context.sourceBlocks
-            var prompt = render(PromptBuilder.groundedMessages(blocks, question, answerLength, context.isBudgetLimited, previous, isSubOneBillion = isSub1B))
+            var prompt = render(PromptBuilder.groundedMessages(blocks, question, answerLength, context.isBudgetLimited, previous, tier = tier))
             // Final guard: the assembler budgets conservatively, but never send a prompt that cannot fit.
             while (blocks.size > 1 && countPromptTokens(prompt) + maxNew > contextWindow()) {
                 blocks = blocks.dropLast(1)
-                prompt = render(PromptBuilder.groundedMessages(blocks, question, answerLength, isBudgetLimited = true, previousQuestion = previous, isSubOneBillion = isSub1B))
+                prompt = render(PromptBuilder.groundedMessages(blocks, question, answerLength, isBudgetLimited = true, previousQuestion = previous, tier = tier))
             }
             // Grounded answers decode with mild stochastic temperature and repetition penalty to prevent sentence loops
             val answer = runInference(prompt, maxNewTokens(answerLength), temperature = GROUNDED_TEMPERATURE, request = request, repeatPenalty = GROUNDED_REPEAT_PENALTY)
@@ -344,8 +341,19 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
         var completed = false
         try {
             request.onStarted?.invoke()
-            val partial: ((String) -> Unit)? = request.onPartial?.let { cb ->
-                { text: String -> cb(PromptBuilder.visibleAnswer(text, promptOpensThinking)) }
+            // Watches the streamed answer for loops: a looping answer is ended early and keeps what it has.
+            var stoppedForLoop = false
+            val watchLoops = { visible: String ->
+                if (!stoppedForLoop && RepetitionGuard.isLooping(visible)) {
+                    stoppedForLoop = true
+                    Log.i(TAG, "Answer started repeating itself; ending generation early")
+                    llamaRunner.finishEarly()
+                }
+            }
+            val partial: (String) -> Unit = { text ->
+                val visible = PromptBuilder.visibleAnswer(text, promptOpensThinking)
+                watchLoops(visible)
+                request.onPartial?.invoke(visible)
             }
             val budget = answerTokens + thinkingTokens()
             var raw = llamaRunner.inference(prompt, budget, temperature, TOP_P, repeatPenalty, token, onPartial = partial)
@@ -356,11 +364,16 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
                 val forced = prompt + raw.trimEnd() + "\n</think>\n\n"
                 if (countPromptTokens(forced) + answerTokens <= contextWindow()) {
                     lastPrompt = forced
-                    val answer = llamaRunner.inference(forced, answerTokens, temperature, TOP_P, repeatPenalty, token, onPartial = request.onPartial)
+                    val answer = llamaRunner.inference(forced, answerTokens, temperature, TOP_P, repeatPenalty, token, onPartial = { text ->
+                        watchLoops(text)
+                        request.onPartial?.invoke(text)
+                    })
                     raw = raw.trimEnd() + "\n</think>\n\n" + answer
                 }
             }
-            val cleaned = PromptBuilder.cleanOutput(raw, promptOpensThinking)
+            var cleaned = PromptBuilder.cleanOutput(raw, promptOpensThinking)
+            if (stoppedForLoop) cleaned = RepetitionGuard.dropUnfinishedTail(cleaned)
+            cleaned = RepetitionGuard.clean(cleaned)
             if (token.isCancelled) throw GenerationCancelledException(cleaned)
             completed = true
             if (cleaned.isBlank()) throw IllegalStateException("Local neural model produced an empty answer.")

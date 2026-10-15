@@ -19,7 +19,7 @@ import java.util.Locale
 object TextChunker {
 
     /** Bump when chunking behaviour changes; part of the document index signature. */
-    const val VERSION = 4
+    const val VERSION = 5
 
     const val DEFAULT_TARGET_TOKENS = 128
     const val DEFAULT_MAX_TOKENS = 180
@@ -103,7 +103,7 @@ object TextChunker {
     ): List<Chunk> {
         require(maxTokens > 0 && targetTokens in 1..maxTokens) { "Invalid chunk token limits" }
         if (pages.isEmpty()) return emptyList()
-        val rawBlocks = mergeCrossPageParagraphs(parseBlocks(pages))
+        val rawBlocks = mergeCrossPageParagraphs(parseBlocks(stripRunningHeadersAndFooters(pages)))
         val blocks = rawBlocks.filterNot { isTableOfContents(it.text, it.sectionTitle) }
         // Leave room for a section heading to share the chunk with the unit that follows it.
         val unitLimit = (maxTokens - HEADING_RESERVE_TOKENS).coerceAtLeast(maxTokens / 2)
@@ -114,6 +114,55 @@ object TextChunker {
     /** Backward-compatible single-page API. */
     fun chunkText(text: String, pageNumber: Int, tokenCounter: (String) -> Int = approximateTokenCounter): List<Chunk> =
         chunkDocument(listOf(ExtractedPage(pageNumber, text)), tokenCounter)
+
+    // ---------------------------------------------------------------------------------------------
+    // 0. Running headers and footers
+    // ---------------------------------------------------------------------------------------------
+
+    /** How many lines at the top and at the bottom of a page can be a running header or footer. */
+    private const val EDGE_LINES = 2
+    /** Fewer pages give too little evidence that a line repeats because it is a header. */
+    private const val MIN_PAGES_FOR_RUNNING_LINES = 4
+    /** Share of pages a top/bottom line must appear on (odd/even pages often alternate headers). */
+    private const val RUNNING_LINE_PAGE_SHARE = 0.4
+    /** Page-numbered headers/footers are short ("Chapter 2 · Page 17"); only such lines get digits masked. */
+    private const val MASKED_LINE_MAX_WORDS = 8
+    private val DIGITS = Regex("""\d+""")
+    private val PAGE_NUMBER_LINE = Regex("""(?i)^(?:page\s*)?\d{1,4}(?:\s*(?:of|/)\s*\d{1,4})?$|^[-–—]\s*\d{1,4}\s*[-–—]$""")
+
+    /**
+     * Removes lines that the PDF prints at the top or bottom of most pages (document title, chapter
+     * name, "Page 3 of 40", bare page numbers). They carry no content, but repeated in every chunk they
+     * make all passages look alike to the embedder, add noise to keyword search and give the model
+     * page numbers to misquote. Short lines are compared with digits masked so "Page 3" matches
+     * "Page 4"; longer lines must repeat exactly, so numbered content lines are never merged.
+     */
+    internal fun stripRunningHeadersAndFooters(pages: List<ExtractedPage>): List<ExtractedPage> {
+        fun key(line: String): String {
+            val normal = line.trim().lowercase().replace(WHITESPACE, " ")
+            return if (normal.split(' ').size <= MASKED_LINE_MAX_WORDS) normal.replace(DIGITS, "#") else normal
+        }
+        fun edgeIndices(lines: List<String>): List<Int> {
+            val content = lines.indices.filter { lines[it].isNotBlank() }
+            return (content.take(EDGE_LINES) + content.takeLast(EDGE_LINES)).distinct()
+        }
+
+        val pageLines = pages.map { it.text.lines() }
+        val running: Set<String> = if (pages.size >= MIN_PAGES_FOR_RUNNING_LINES) {
+            val pagesWithKey = HashMap<String, Int>()
+            for (lines in pageLines) {
+                edgeIndices(lines).map { key(lines[it]) }.distinct().forEach { pagesWithKey.merge(it, 1, Int::plus) }
+            }
+            val threshold = maxOf(3, kotlin.math.ceil(pages.size * RUNNING_LINE_PAGE_SHARE).toInt())
+            pagesWithKey.filter { (k, n) -> n >= threshold && k.length <= 150 && k.any { it.isLetterOrDigit() || it == '#' } }.keys
+        } else emptySet()
+
+        return pages.mapIndexed { p, page ->
+            val lines = pageLines[p]
+            val drop = edgeIndices(lines).filter { i -> key(lines[i]) in running || PAGE_NUMBER_LINE.matches(lines[i].trim()) }.toSet()
+            if (drop.isEmpty()) page else page.copy(text = lines.filterIndexed { i, _ -> i !in drop }.joinToString("\n").trim())
+        }
+    }
 
     // ---------------------------------------------------------------------------------------------
     // 1. Structural parsing
