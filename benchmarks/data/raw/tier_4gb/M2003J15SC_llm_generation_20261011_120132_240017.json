@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 760.32,
+    "native_heap_mb": 301.48,
+    "java_heap_mb": 20.98,
+    "battery_temp_c": 37.9
+  },
+  "telemetry_data": {
+    "event_type": "LLM_GENERATION",
+    "timestamp_epoch_ms": 1791700290840,
+    "model_name": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "context_size": 4096,
+    "prompt_tokens": 718,
+    "reused_prompt_tokens": 203,
+    "prefill_ms": 41066,
+    "prefill_tokens_per_second": 12.540787999805191,
+    "threads_decode": 4,
+    "threads_batch": 5,
+    "cpu_variant": "android_armv8.2_2",
+    "cpu_topology": "2+6",
+    "generated_tokens": 106,
+    "ttft_ms": 41092,
+    "decode_ms": 15379,
+    "total_generation_ms": 56474,
+    "tokens_per_second": 6.8925157682554135,
+    "is_cancelled": false
+  }
+}

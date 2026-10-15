@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "ZN5223G85S",
+    "brand": "motorola",
+    "model": "moto g67 power 5G",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "parrot",
+    "total_ram_mb": 7462.3,
+    "total_ram_gb": 7.29,
+    "ram_tier": "tier_8gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 2165.76,
+    "native_heap_mb": 1125.13,
+    "java_heap_mb": 20.74,
+    "battery_temp_c": 35.0
+  },
+  "telemetry_data": {
+    "event_type": "LLM_GENERATION",
+    "timestamp_epoch_ms": 1791710976354,
+    "model_name": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    "context_size": 4096,
+    "prompt_tokens": 1421,
+    "reused_prompt_tokens": 202,
+    "prefill_ms": 19676,
+    "prefill_tokens_per_second": 61.95364911567392,
+    "threads_decode": 4,
+    "threads_batch": 4,
+    "cpu_variant": "android_armv8.2_2",
+    "cpu_topology": "4+4",
+    "generated_tokens": 83,
+    "ttft_ms": 19693,
+    "decode_ms": 8495,
+    "total_generation_ms": 28189,
+    "tokens_per_second": 9.770453207769275,
+    "is_cancelled": false
+  }
+}

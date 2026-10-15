@@ -105,7 +105,9 @@ class ONNXEmbeddingEngine private constructor(
             )
 
             val env = OrtEnvironment.getEnvironment()
-            val options = OrtSession.SessionOptions().apply { setIntraOpNumThreads(2) }
+            // Embedding is compute-bound like prompt processing; cap at 4 because the 22M-parameter model gains little beyond that.
+            val threads = com.siddu.offlinedocai.ai.llm.CpuTopology.device.defaultBatchThreads.coerceIn(1, 4)
+            val options = OrtSession.SessionOptions().apply { setIntraOpNumThreads(threads) }
             val session = env.createSession(onnxFile.absolutePath, options)
             hasTokenTypeIds = session.inputNames.contains("token_type_ids")
             tokenizer = WordPieceTokenizer(vocabFile)

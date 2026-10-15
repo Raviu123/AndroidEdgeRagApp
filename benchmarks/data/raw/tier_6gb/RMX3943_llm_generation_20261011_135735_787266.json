@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 791.63,
+    "native_heap_mb": 53.82,
+    "java_heap_mb": 21.95,
+    "battery_temp_c": 38.6
+  },
+  "telemetry_data": {
+    "event_type": "LLM_GENERATION",
+    "timestamp_epoch_ms": 1791707254903,
+    "model_name": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "context_size": 4096,
+    "prompt_tokens": 887,
+    "reused_prompt_tokens": 202,
+    "prefill_ms": 29481,
+    "prefill_tokens_per_second": 23.23530409416234,
+    "threads_decode": 2,
+    "threads_batch": 5,
+    "cpu_variant": "android_armv8.0_1",
+    "cpu_topology": "2+6",
+    "generated_tokens": 112,
+    "ttft_ms": 29499,
+    "decode_ms": 17170,
+    "total_generation_ms": 46669,
+    "tokens_per_second": 6.52300524170064,
+    "is_cancelled": false
+  }
+}

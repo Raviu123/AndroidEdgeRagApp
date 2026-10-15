@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 763.41,
+    "native_heap_mb": 303.04,
+    "java_heap_mb": 21.01,
+    "battery_temp_c": 38.3
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791700337537,
+    "query": "How does MASVS address privacy in mobile applications?",
+    "intent": "GENERAL",
+    "document_ids": "3",
+    "total_corpus_chunks": 24,
+    "top_k_candidates": 24,
+    "filtered_chunks": 6,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 18,
+    "dense_search_ms": 8,
+    "bm25_search_ms": 4,
+    "rrf_fusion_ms": 4,
+    "context_assembly_ms": 69,
+    "total_retrieval_ms": 105,
+    "assembled_tokens": 548,
+    "budget_tokens": 753
+  }
+}

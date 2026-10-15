@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "ZN5223G85S",
+    "brand": "motorola",
+    "model": "moto g67 power 5G",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "parrot",
+    "total_ram_mb": 7462.3,
+    "total_ram_gb": 7.29,
+    "ram_tier": "tier_8gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 767.15,
+    "native_heap_mb": 97.32,
+    "java_heap_mb": 20.24,
+    "battery_temp_c": 37.0
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791705470564,
+    "query": "What security measures should be used for user authentication?small paragraph anwer",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 21,
+    "top_k_candidates": 21,
+    "filtered_chunks": 7,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 27,
+    "dense_search_ms": 10,
+    "bm25_search_ms": 5,
+    "rrf_fusion_ms": 5,
+    "context_assembly_ms": 46,
+    "total_retrieval_ms": 94,
+    "assembled_tokens": 1122,
+    "budget_tokens": 1559
+  }
+}

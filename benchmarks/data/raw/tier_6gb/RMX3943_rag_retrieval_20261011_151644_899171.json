@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 1239.08,
+    "native_heap_mb": 168.43,
+    "java_heap_mb": 22.96,
+    "battery_temp_c": 35.0
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791712003977,
+    "query": "What is MASVS?",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 21,
+    "top_k_candidates": 21,
+    "filtered_chunks": 6,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 0,
+    "query_embedding_ms": 112,
+    "dense_search_ms": 27,
+    "bm25_search_ms": 13,
+    "rrf_fusion_ms": 13,
+    "context_assembly_ms": 126,
+    "total_retrieval_ms": 293,
+    "assembled_tokens": 524,
+    "budget_tokens": 600
+  }
+}

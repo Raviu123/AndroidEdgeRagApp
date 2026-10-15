@@ -53,4 +53,21 @@ interface LocalLLM {
 
     /** Metrics from the most recent inference run. */
     val lastInferenceMetrics: LlamaRunner.InferenceMetrics? get() = null
+
+    /** How the most recent [availableEvidenceTokens] result was derived. */
+    val lastBudgetInfo: EvidenceBudgetInfo? get() = null
 }
+
+/**
+ * Evidence budget explanation: [contextFitTokens] is what fits in the context window; [speedCapTokens]
+ * is what this device can process within [targetSeconds] at [prefillTokensPerSecond] (null = speed not
+ * measured yet, so only the context window applied).
+ */
+data class EvidenceBudgetInfo(
+    val contextFitTokens: Int,
+    val speedCapTokens: Int?,
+    val prefillTokensPerSecond: Double?,
+    val targetSeconds: Double,
+    val thermal: String,
+    val speedMode: String
+)

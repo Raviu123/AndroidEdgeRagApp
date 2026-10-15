@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 755.15,
+    "native_heap_mb": 303.5,
+    "java_heap_mb": 20.47,
+    "battery_temp_c": 39.2
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791700546810,
+    "query": "How do data storage security, privacy, and cryptography work together to protect user information?",
+    "intent": "GENERAL",
+    "document_ids": "3",
+    "total_corpus_chunks": 25,
+    "top_k_candidates": 25,
+    "filtered_chunks": 5,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 35,
+    "dense_search_ms": 9,
+    "bm25_search_ms": 4,
+    "rrf_fusion_ms": 4,
+    "context_assembly_ms": 81,
+    "total_retrieval_ms": 136,
+    "assembled_tokens": 665,
+    "budget_tokens": 820
+  }
+}

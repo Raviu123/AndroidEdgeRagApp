@@ -1,0 +1,35 @@
+{
+  "device_profile": {
+    "serial": "ZN5223G85S",
+    "brand": "motorola",
+    "model": "moto g67 power 5G",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "parrot",
+    "total_ram_mb": 7462.3,
+    "total_ram_gb": 7.29,
+    "ram_tier": "tier_8gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 568.34,
+    "native_heap_mb": 126.09,
+    "java_heap_mb": 33.02,
+    "battery_temp_c": 37.0
+  },
+  "telemetry_data": {
+    "event_type": "DOCUMENT_INGESTION",
+    "timestamp_epoch_ms": 1791705322491,
+    "document_id": 1,
+    "document_name": "OWASP_MASVS.pdf",
+    "file_size_bytes": 1016447,
+    "page_count": 35,
+    "chunk_count": 172,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "extraction_ms": 2075,
+    "chunking_ms": 370,
+    "embedding_ms": 3388,
+    "db_insert_ms": 31,
+    "total_ingest_ms": 5881,
+    "throughput_pages_per_sec": 5.95136881482741,
+    "throughput_chunks_per_sec": 50.76741440377804
+  }
+}

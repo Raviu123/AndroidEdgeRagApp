@@ -59,16 +59,27 @@ class LlamaRunner(context: Context) {
 
     data class InferenceMetrics(
         val modelName: String,
+        /** Call start -> first token sampled (prompt processing included), measured natively. */
         val ttftMs: Long,
         val decodeMs: Long,
         val totalGenerationMs: Long,
         val generatedTokens: Int,
-        val tokensPerSecond: Double
+        val tokensPerSecond: Double,
+        val promptTokens: Int = 0,
+        /** Prompt prefix served from the previous request's KV cache (not re-processed). */
+        val reusedPromptTokens: Int = 0,
+        val prefillMs: Long = 0L,
+        val prefillTokensPerSecond: Double = 0.0,
+        val threadsDecode: Int = 0,
+        val threadsBatch: Int = 0
     )
 
     @Volatile
     var lastInferenceMetrics: InferenceMetrics? = null
         private set
+
+    /** Receives (newPromptTokens, prefillMs, generatedTokens, decodeMs) after each completed inference. */
+    @Volatile var onSpeedSample: ((Long, Long, Long, Long) -> Unit)? = null
 
     val currentState: LlamaState get() = _runnerState.value
     val isGenerating: Boolean get() = _runnerState.value == LlamaState.GENERATING
@@ -86,9 +97,54 @@ class LlamaRunner(context: Context) {
 
     fun getLoadedModelPath(): String? = loadedModelPath
 
-    /** Loads (or reuses) a GGUF model. Blocking; call from a background dispatcher. */
+    /** Loads (or reuses) a GGUF model, then applies [threads]. Blocking; call from a background dispatcher. */
     @Synchronized
-    fun loadModel(modelPath: String, contextSize: Int = 4096, threadCount: Int = 4): Boolean {
+    fun loadModel(modelPath: String, contextSize: Int = 4096, threads: ThreadPlan = ThreadPlan(4, 4)): Boolean {
+        if (!loadModelInternal(modelPath, contextSize, threads.decode)) return false
+        setThreads(threads)
+        return true
+    }
+
+    /** Thread counts for generation / prompt processing; applies to the next run without reloading. */
+    @Synchronized
+    fun setThreads(threads: ThreadPlan) {
+        if (handle == 0L) return
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        LlamaNative.nativeSetThreads(handle, threads.decode.coerceIn(1, cores), threads.batch.coerceIn(1, cores))
+    }
+
+    /**
+     * Synthetic speed test (see [LlamaNative.nativeBenchmark]); null when it failed or was interrupted.
+     * Runs with the crash sentinel armed: it is often the first time the CPU kernels execute.
+     */
+    @Synchronized
+    fun benchmark(promptTokens: Int, genTokens: Int, threadsDecode: Int, threadsBatch: Int): LongArray? {
+        if (handle == 0L) return null
+        val ptr = handle
+        _runnerState.value = LlamaState.GENERATING
+        return try {
+            LlamaNative.nativeResetCancel(ptr)
+            benchmarkRunning = true
+            LlamaNative.guarded { LlamaNative.nativeBenchmark(ptr, promptTokens, genTokens, threadsDecode, threadsBatch) }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Benchmark failed: ${t.message}")
+            null
+        } finally {
+            benchmarkRunning = false
+            _runnerState.value = if (handle != 0L) LlamaState.READY else LlamaState.ERROR
+        }
+    }
+
+    @Volatile private var benchmarkRunning = false
+
+    /** Stops a running [benchmark] (never a real generation). Not synchronized: it must not wait for the run. */
+    fun interruptBenchmark() {
+        synchronized(handleLock) {
+            if (benchmarkRunning && handle != 0L) LlamaNative.nativeCancel(handle)
+        }
+    }
+
+    private fun loadModelInternal(modelPath: String, contextSize: Int, threadCount: Int): Boolean {
         if (!isNativeLoaded) {
             lastErrorMessage = lastErrorMessage ?: "Unable to initialize the local LLM: native library not loaded."
             return false
@@ -188,24 +244,26 @@ class LlamaRunner(context: Context) {
         token.onCancel = { cancelNative(token) }
         if (token.isCancelled) LlamaNative.nativeCancel(ptr)
         try {
-            var firstTokenTimeMs = 0L
-            val promptTokens = countTokens(prompt, isPrompt = true) ?: 0
-            val listener = NativeTextListener { bytes ->
-                if (firstTokenTimeMs == 0L) {
-                    firstTokenTimeMs = SystemClock.elapsedRealtime()
-                }
-                onPartial?.invoke(bytes.toString(Charsets.UTF_8))
-            }
+            val listener = NativeTextListener { bytes -> onPartial?.invoke(bytes.toString(Charsets.UTF_8)) }
             val run = {
                 LlamaNative.nativeInference(ptr, prompt.toByteArray(Charsets.UTF_8), maxTokens, temperature, topP, repeatPenalty, seed, listener)
             }
-            val bytes = if (firstGenerationPending) LlamaNative.guarded(run).also { firstGenerationPending = false } else run()
+            // The sentinel is armed for the first run after a load, and for every run on crash-prone chips.
+            val bytes = if (firstGenerationPending || LlamaNative.alwaysGuarded) LlamaNative.guarded(run).also { firstGenerationPending = false } else run()
             val totalMs = SystemClock.elapsedRealtime() - startedAt
             val resultText = bytes.toString(Charsets.UTF_8)
-            val ttftMs = if (firstTokenTimeMs > 0L) firstTokenTimeMs - startedAt else totalMs
-            val decodeMs = if (firstTokenTimeMs > 0L) totalMs - ttftMs else totalMs
-            val generatedTokens = countTokens(resultText) ?: resultText.split("\\s+".toRegex()).size
-            val tps = if (decodeMs > 0) (generatedTokens * 1000.0) / decodeMs else 0.0
+
+            // [promptTokens, reusedTokens, prefillMs, firstTokenMs, decodeMs, generatedTokens, threadsDecode, threadsBatch]
+            val s = runCatching { LlamaNative.nativeLastStats(ptr) }.getOrNull()?.takeIf { it.size >= 8 }
+            val promptTokens = s?.get(0)?.toInt() ?: 0
+            val reused = s?.get(1)?.toInt() ?: 0
+            val prefillMs = s?.get(2) ?: 0L
+            val ttftMs = s?.get(3) ?: totalMs
+            val decodeMs = s?.get(4) ?: 0L
+            val generatedTokens = s?.get(5)?.toInt() ?: (countTokens(resultText) ?: 0)
+            // The decode window starts when the first token is sampled and holds one model step per generated token.
+            val tps = if (decodeMs > 0 && generatedTokens > 0) (generatedTokens * 1000.0) / decodeMs else 0.0
+            val prefillTps = if (prefillMs > 0) ((promptTokens - reused) * 1000.0) / prefillMs else 0.0
             val modelFilename = loadedModelPath?.let { java.io.File(it).name } ?: "GGUF Model"
 
             lastInferenceMetrics = InferenceMetrics(
@@ -214,10 +272,19 @@ class LlamaRunner(context: Context) {
                 decodeMs = decodeMs,
                 totalGenerationMs = totalMs,
                 generatedTokens = generatedTokens,
-                tokensPerSecond = tps
+                tokensPerSecond = tps,
+                promptTokens = promptTokens,
+                reusedPromptTokens = reused,
+                prefillMs = prefillMs,
+                prefillTokensPerSecond = prefillTps,
+                threadsDecode = s?.get(6)?.toInt() ?: 0,
+                threadsBatch = s?.get(7)?.toInt() ?: 0
             )
+            if (!token.isCancelled) {
+                onSpeedSample?.invoke((promptTokens - reused).toLong(), prefillMs, generatedTokens.toLong(), decodeMs)
+            }
 
-            Log.i(TAG, "Inference finished in $totalMs ms (TTFT: ${ttftMs}ms, Decode: ${decodeMs}ms, Tokens: $generatedTokens, TPS: ${String.format(java.util.Locale.US, "%.2f", tps)})")
+            Log.i(TAG, "Inference finished in $totalMs ms (prompt $promptTokens tok, reused $reused, prefill ${prefillMs}ms = ${"%.1f".format(java.util.Locale.US, prefillTps)} tok/s, TTFT ${ttftMs}ms, decode ${decodeMs}ms for $generatedTokens tok = ${"%.2f".format(java.util.Locale.US, tps)} tok/s)")
             com.siddu.offlinedocai.ai.telemetry.BenchmarkTelemetry.logGeneration(
                 modelName = modelFilename,
                 contextSize = this.contextSize,
@@ -227,7 +294,14 @@ class LlamaRunner(context: Context) {
                 decodeMs = decodeMs,
                 totalGenerationMs = totalMs,
                 tokensPerSecond = tps,
-                isCancelled = token.isCancelled
+                isCancelled = token.isCancelled,
+                reusedPromptTokens = reused,
+                prefillMs = prefillMs,
+                prefillTokensPerSecond = prefillTps,
+                threadsDecode = s?.get(6)?.toInt() ?: 0,
+                threadsBatch = s?.get(7)?.toInt() ?: 0,
+                cpuVariant = LlamaNative.cpuVariant,
+                cpuTopology = CpuTopology.device.label
             )
             return resultText
         } catch (e: Throwable) {

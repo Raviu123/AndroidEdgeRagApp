@@ -1,0 +1,18 @@
+% IEEE / ACM Table for On-Device RAG Evaluation
+\begin{table*}[t]
+\centering
+\caption{Empirical Multi-Tier On-Device RAG Evaluation across Heterogeneous Hardware Tiers}
+\label{tab:multitier_rag_results}
+\begin{tabular}{lcccccc}
+\hline
+\textbf{Hardware Tier} & \textbf{Model} & \textbf{Decode (tok/s)} & \textbf{TTFT (s)} & \textbf{Peak PSS (MB)} & \textbf{Retrieval (ms)} & \textbf{Ingest (p/s)} \\ \hline
+4GB Tier & Qwen 2.5 0.5B & 8.57 $\pm$ 1.50 & 29.64 & 766.9 & 186.1 & 2.48 \\
+4GB Tier & Llama 3.2 1B & 3.67 $\pm$ 0.77 & 54.11 & 1199.4 & 186.1 & 2.48 \\
+6GB Tier & Qwen 2.5 0.5B & 8.18 $\pm$ 1.90 & 25.19 & 788.4 & 136.1 & 4.02 \\
+6GB Tier & Llama 3.2 1B & 3.79 $\pm$ 0.74 & 50.16 & 1259.2 & 136.1 & 4.02 \\
+8GB Tier & Qwen 2.5 0.5B & 19.42 $\pm$ 0.70 & 14.70 & 770.6 & 78.7 & 5.95 \\
+8GB Tier & Llama 3.2 1B & 10.66 $\pm$ 0.88 & 15.71 & 1990.2 & 78.7 & 5.95 \\
+8GB Tier & Qwen 2.5 1.5B & 9.07 $\pm$ 1.43 & 19.16 & 1885.6 & 78.7 & 5.95 \\
+\hline
+\end{tabular}
+\end{table*}

@@ -1,0 +1,35 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 587.93,
+    "native_heap_mb": 402.91,
+    "java_heap_mb": 28.25,
+    "battery_temp_c": 34.1
+  },
+  "telemetry_data": {
+    "event_type": "DOCUMENT_INGESTION",
+    "timestamp_epoch_ms": 1791699758708,
+    "document_id": 3,
+    "document_name": "OWASP_MASVS.pdf",
+    "file_size_bytes": 1016447,
+    "page_count": 35,
+    "chunk_count": 172,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "extraction_ms": 5764,
+    "chunking_ms": 303,
+    "embedding_ms": 7789,
+    "db_insert_ms": 210,
+    "total_ingest_ms": 14111,
+    "throughput_pages_per_sec": 2.4803344908227625,
+    "throughput_chunks_per_sec": 22.082423931185005
+  }
+}

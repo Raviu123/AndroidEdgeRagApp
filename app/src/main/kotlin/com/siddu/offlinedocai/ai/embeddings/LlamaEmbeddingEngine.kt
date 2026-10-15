@@ -2,7 +2,7 @@ package com.siddu.offlinedocai.ai.embeddings
 
 import android.content.Context
 import android.util.Log
-import com.siddu.offlinedocai.ai.llm.CpuInfo
+import com.siddu.offlinedocai.ai.llm.CpuTopology
 import com.siddu.offlinedocai.ai.llm.LlamaNative
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,7 +40,7 @@ class LlamaEmbeddingEngine(
         }
         return try {
             val ptr = LlamaNative.guarded {
-                LlamaNative.nativeEmbedInit(modelFile.absolutePath.toByteArray(Charsets.UTF_8), spec.maxSequenceLength, minOf(4, CpuInfo.performanceCores))
+                LlamaNative.nativeEmbedInit(modelFile.absolutePath.toByteArray(Charsets.UTF_8), spec.maxSequenceLength, CpuTopology.device.defaultBatchThreads.coerceIn(1, 4))
             }
             if (ptr == 0L) {
                 lastError = "llama.cpp could not load this embedding model."

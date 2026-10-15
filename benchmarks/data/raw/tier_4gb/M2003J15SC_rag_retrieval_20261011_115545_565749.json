@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 783.91,
+    "native_heap_mb": 356.83,
+    "java_heap_mb": 20.82,
+    "battery_temp_c": 36.3
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791699944166,
+    "query": "What security measures are recommended for network communication?",
+    "intent": "GENERAL",
+    "document_ids": "3",
+    "total_corpus_chunks": 22,
+    "top_k_candidates": 22,
+    "filtered_chunks": 4,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 2,
+    "query_embedding_ms": 15,
+    "dense_search_ms": 7,
+    "bm25_search_ms": 3,
+    "rrf_fusion_ms": 3,
+    "context_assembly_ms": 72,
+    "total_retrieval_ms": 104,
+    "assembled_tokens": 696,
+    "budget_tokens": 956
+  }
+}

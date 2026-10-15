@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 572.24,
+    "native_heap_mb": 402.11,
+    "java_heap_mb": 19.46,
+    "battery_temp_c": 34.5
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791699804356,
+    "query": "What is MASVS?",
+    "intent": "GENERAL",
+    "document_ids": "3",
+    "total_corpus_chunks": 21,
+    "top_k_candidates": 21,
+    "filtered_chunks": 5,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 21,
+    "query_embedding_ms": 19,
+    "dense_search_ms": 249,
+    "bm25_search_ms": 124,
+    "rrf_fusion_ms": 124,
+    "context_assembly_ms": 61,
+    "total_retrieval_ms": 599,
+    "assembled_tokens": 647,
+    "budget_tokens": 813
+  }
+}

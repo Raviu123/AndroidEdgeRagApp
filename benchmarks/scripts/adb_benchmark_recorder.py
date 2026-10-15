@@ -287,7 +287,8 @@ class BenchmarkRecorder:
         poller_thread = threading.Thread(target=self.poll_hardware_stats, daemon=True)
         poller_thread.start()
 
-        # Clear logcat buffer
+        # Expand buffer to 16MB and clear old logs
+        self.adb_cmd(["logcat", "-G", "16M"])
         self.adb_cmd(["logcat", "-c"])
 
         print(f"\n[+] LISTENING FOR TELEMETRY EVENTS FROM '{PACKAGE_NAME}'...")
@@ -298,12 +299,26 @@ class BenchmarkRecorder:
         adb_base = ["adb"]
         if self.serial:
             adb_base.extend(["-s", self.serial])
-        adb_base.extend(["logcat", "-v", "raw", "-s", f"{BENCHMARK_TAG}:I"])
+        # Explicitly use -b main so MIUI kernel/system security filters do not drop the socket
+        adb_base.extend(["logcat", "-b", "main", "-v", "raw", "-s", f"{BENCHMARK_TAG}:I"])
 
-        proc = subprocess.Popen(adb_base, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
+        print("[*] Starting ADB logcat stream on 'main' buffer...", flush=True)
+        proc = subprocess.Popen(adb_base, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", bufsize=1)
 
         try:
-            for line in proc.stdout:
+            while not self.stop_signal.is_set():
+                line = proc.stdout.readline()
+                if not line:
+                    # Check if process terminated
+                    if proc.poll() is not None:
+                        err_out = proc.stderr.read().strip()
+                        if err_out:
+                            print(f"[!] ADB logcat process exited with error ({proc.returncode}): {err_out}", flush=True)
+                        else:
+                            print(f"[!] ADB logcat stream reached EOF (device disconnected or ADB restarted).", flush=True)
+                        break
+                    continue
+
                 line = line.strip()
                 if not line or not line.startswith("{"):
                     continue
@@ -315,38 +330,41 @@ class BenchmarkRecorder:
 
                     if event_type == "DOCUMENT_INGESTION":
                         self.append_ingestion_csv(payload)
-                        print(f"[{datetime.now().strftime('%H:%M:%S')}] 📄 INGESTION COMPLETE:")
-                        print(f"    • Document: {payload.get('document_name')} ({payload.get('page_count')} pages, {payload.get('chunk_count')} chunks)")
-                        print(f"    • Total Ingest Time: {payload.get('total_ingest_ms')} ms ({payload.get('throughput_pages_per_sec'):.2f} pages/sec)")
-                        print(f"    • Saved: {raw_file.name}")
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] 📄 INGESTION COMPLETE:", flush=True)
+                        print(f"    • Document: {payload.get('document_name')} ({payload.get('page_count')} pages, {payload.get('chunk_count')} chunks)", flush=True)
+                        print(f"    • Total Ingest Time: {payload.get('total_ingest_ms')} ms ({payload.get('throughput_pages_per_sec'):.2f} pages/sec)", flush=True)
+                        print(f"    • Saved: {raw_file.name}", flush=True)
 
                     elif event_type == "RAG_RETRIEVAL":
                         self.append_retrieval_csv(payload)
-                        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 RETRIEVAL COMPLETE:")
-                        print(f"    • Query: \"{payload.get('query')}\" (Intent: {payload.get('intent')})")
-                        print(f"    • Total Retrieval: {payload.get('total_retrieval_ms')} ms | Routing: {payload.get('intent_routing_ms')} ms | Embed: {payload.get('query_embedding_ms')} ms | Search: {payload.get('dense_search_ms')} ms")
-                        print(f"    • Assembled Context: {payload.get('assembled_tokens')} tokens")
-                        print(f"    • Saved: {raw_file.name}")
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 RETRIEVAL COMPLETE:", flush=True)
+                        print(f"    • Query: \"{payload.get('query')}\" (Intent: {payload.get('intent')})", flush=True)
+                        print(f"    • Total Retrieval: {payload.get('total_retrieval_ms')} ms | Routing: {payload.get('intent_routing_ms')} ms | Embed: {payload.get('query_embedding_ms')} ms | Search: {payload.get('dense_search_ms')} ms", flush=True)
+                        print(f"    • Assembled Context: {payload.get('assembled_tokens')} tokens", flush=True)
+                        print(f"    • Saved: {raw_file.name}", flush=True)
 
                     elif event_type == "LLM_GENERATION":
                         self.append_generation_csv(payload)
-                        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🤖 GENERATION COMPLETE:")
-                        print(f"    • Model: {payload.get('model_name')}")
-                        print(f"    • TTFT (Time To First Token): {payload.get('ttft_ms')} ms")
-                        print(f"    • Throughput (Decode Speed): {payload.get('tokens_per_second'):.2f} tokens/sec ({payload.get('generated_tokens')} tokens in {payload.get('decode_ms')} ms)")
-                        print(f"    • Peak RSS Memory: {self.latest_hardware_snapshot.get('pss_total_mb')} MB (Native Heap: {self.latest_hardware_snapshot.get('native_heap_mb')} MB)")
-                        print(f"    • Saved: {raw_file.name}")
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🤖 GENERATION COMPLETE:", flush=True)
+                        print(f"    • Model: {payload.get('model_name')}", flush=True)
+                        print(f"    • TTFT (Time To First Token): {payload.get('ttft_ms')} ms", flush=True)
+                        print(f"    • Throughput (Decode Speed): {payload.get('tokens_per_second'):.2f} tokens/sec ({payload.get('generated_tokens')} tokens in {payload.get('decode_ms')} ms)", flush=True)
+                        print(f"    • Peak RSS Memory: {self.latest_hardware_snapshot.get('pss_total_mb')} MB (Native Heap: {self.latest_hardware_snapshot.get('native_heap_mb')} MB)", flush=True)
+                        print(f"    • Saved: {raw_file.name}", flush=True)
 
-                    print("-" * 60)
+                    print("-" * 60, flush=True)
 
                 except json.JSONDecodeError:
                     continue
         except KeyboardInterrupt:
-            print("\n[!] Recording stopped by user.")
+            print("\n[!] Recording stopped by user.", flush=True)
         finally:
             self.stop_signal.set()
-            proc.terminate()
-            print("[+] Benchmarking session closed.")
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            print("[+] Benchmarking session closed.", flush=True)
 
 if __name__ == "__main__":
     import argparse

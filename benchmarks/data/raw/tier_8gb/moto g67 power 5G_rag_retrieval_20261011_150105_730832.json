@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "ZN5223G85S",
+    "brand": "motorola",
+    "model": "moto g67 power 5G",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "parrot",
+    "total_ram_mb": 7462.3,
+    "total_ram_gb": 7.29,
+    "ram_tier": "tier_8gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 2138.57,
+    "native_heap_mb": 1125.68,
+    "java_heap_mb": 20.24,
+    "battery_temp_c": 35.0
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791711066161,
+    "query": "What is the purpose of secure session management?",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 22,
+    "top_k_candidates": 22,
+    "filtered_chunks": 10,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 19,
+    "dense_search_ms": 6,
+    "bm25_search_ms": 3,
+    "rrf_fusion_ms": 3,
+    "context_assembly_ms": 47,
+    "total_retrieval_ms": 79,
+    "assembled_tokens": 1239,
+    "budget_tokens": 1610
+  }
+}

@@ -2362,6 +2362,7 @@ fun SettingsScreen(
     val importProgress by viewModel.modelImportProgress.collectAsState()
     val importError by viewModel.modelImportError.collectAsState()
     val compatibilityPreferred by viewModel.compatibilityPreferred.collectAsState()
+    val speedMode by viewModel.speedMode.collectAsState()
 
     var modelToDelete by remember { mutableStateOf<ModelItem?>(null) }
     var embeddingToActivate by remember { mutableStateOf<EmbeddingModelSpec?>(null) }
@@ -2487,7 +2488,8 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                 )
                                 val detail = when (val s = llmLoadState) {
-                                    is LlmLoadState.Ready -> "Context ${s.contextSize} tokens • CPU ${s.cpuVariant}"
+                                    is LlmLoadState.Ready -> "Context ${s.contextSize} tokens • CPU ${s.cpuVariant}" +
+                                        if (s.performance.isNotBlank()) "\n${s.performance}" else ""
                                     is LlmLoadState.Failed -> s.reason
                                     is LlmLoadState.Loading -> "Loading into memory…"
                                     is LlmLoadState.NotLoaded -> "Loads when you ask a question"
@@ -2639,6 +2641,34 @@ fun SettingsScreen(
                             onUse = { if (!isActive) embeddingToActivate = spec else viewModel.activateEmbeddingModel(spec.id) },
                             onDelete = { embeddingToDelete = spec }
                         )
+                    }
+                }
+            }
+
+            // Answer speed: how long the phone may spend reading the sources (adapts to measured speed)
+            item {
+                SectionTitle("Answer speed")
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            com.siddu.offlinedocai.ai.llm.SpeedMode.entries.forEach { mode ->
+                                FilterChip(
+                                    selected = speedMode == mode,
+                                    onClick = { viewModel.setSpeedMode(mode) },
+                                    label = { Text(mode.label) }
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "The app measures this phone's speed and sends the model only as much document text as it can read in about " +
+                                "${speedMode.targetPrefillSeconds} s. Fastest = quicker answers from fewer passages; Thorough = more passages, longer wait. " +
+                                "Uses fewer CPU cores automatically when the phone is hot or in battery saver.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        TextButton(onClick = { viewModel.remeasureSpeed() }) { Text("Re-measure this phone's speed") }
                     }
                 }
             }

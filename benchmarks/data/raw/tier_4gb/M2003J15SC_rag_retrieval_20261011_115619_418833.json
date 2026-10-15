@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 780.74,
+    "native_heap_mb": 357.31,
+    "java_heap_mb": 20.91,
+    "battery_temp_c": 37.0
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791699978022,
+    "query": "What is the purpose of cryptography in mobile applications?",
+    "intent": "GENERAL",
+    "document_ids": "3",
+    "total_corpus_chunks": 22,
+    "top_k_candidates": 22,
+    "filtered_chunks": 5,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 26,
+    "dense_search_ms": 8,
+    "bm25_search_ms": 4,
+    "rrf_fusion_ms": 4,
+    "context_assembly_ms": 81,
+    "total_retrieval_ms": 126,
+    "assembled_tokens": 659,
+    "budget_tokens": 938
+  }
+}

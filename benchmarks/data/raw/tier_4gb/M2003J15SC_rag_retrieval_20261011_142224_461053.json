@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 1205.71,
+    "native_heap_mb": 210.37,
+    "java_heap_mb": 16.99,
+    "battery_temp_c": 39.0
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791708742586,
+    "query": "What security measures should be used for user authentication?small paragraph anwer",
+    "intent": "GENERAL",
+    "document_ids": "3",
+    "total_corpus_chunks": 21,
+    "top_k_candidates": 21,
+    "filtered_chunks": 3,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 40,
+    "dense_search_ms": 20,
+    "bm25_search_ms": 10,
+    "rrf_fusion_ms": 10,
+    "context_assembly_ms": 31,
+    "total_retrieval_ms": 113,
+    "assembled_tokens": 406,
+    "budget_tokens": 600
+  }
+}

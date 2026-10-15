@@ -20,7 +20,8 @@ sealed class LlmLoadState {
     object NoModel : LlmLoadState()
     data class NotLoaded(val modelName: String) : LlmLoadState()
     data class Loading(val modelName: String) : LlmLoadState()
-    data class Ready(val modelName: String, val contextSize: Int, val cpuVariant: String) : LlmLoadState()
+    /** [performance] summarises the CPU layout and threads in use, e.g. "CPU 2+6 • threads 2/5 (tuned)". */
+    data class Ready(val modelName: String, val contextSize: Int, val cpuVariant: String, val performance: String = "") : LlmLoadState()
     data class Failed(val modelName: String, val reason: String) : LlmLoadState()
 }
 
@@ -35,6 +36,8 @@ sealed class LlmLoadState {
  *   training context.
  * - Reasoning models (DeepSeek-R1 style) get a separate thinking budget; if they are still thinking
  *   when it runs out, the reasoning is closed and the model is asked for the answer.
+ * - Speed adapts to the device ([PerformanceTuner]): thread counts are calibrated once per phone and
+ *   model during [warmUp], and evidence is capped so prompt processing fits the chosen [SpeedMode].
  * - There is no non-LLM fallback: if the model is missing or fails, an exception is thrown and the
  *   UI shows a real error instead of a fabricated answer.
  */
@@ -55,8 +58,10 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
         private const val CHAT_TEMPERATURE = 0.6f
         private const val TOP_P = 0.9f
         private const val REPEAT_PENALTY = 1.1f
-        /** Lighter for grounded answers: the required citation tags repeat by design and must not push the model to stop early. */
-        private const val GROUNDED_REPEAT_PENALTY = 1.03f
+        /** Balanced for grounded answers: prevents degenerative loops without suppressing needed citations. */
+        private const val GROUNDED_REPEAT_PENALTY = 1.12f
+        /** Mild temperature breaks argmax sentence repetition loops while keeping factual accuracy. */
+        private const val GROUNDED_TEMPERATURE = 0.12f
 
         const val MODEL_NOT_INSTALLED = "No language model is installed. Open Settings and download or import a model."
 
@@ -70,6 +75,17 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
 
     val llamaRunner: LlamaRunner = LlamaRunner(context)
     private val modelManager: ModelManager get() = ModelManager.getInstance(context)
+    val tuner: PerformanceTuner = PerformanceTuner.getInstance(context)
+
+    init {
+        llamaRunner.onSpeedSample = { newPrompt, prefillMs, generated, decodeMs -> tuner.record(newPrompt, prefillMs, generated, decodeMs) }
+    }
+
+    /** Text of the last prompt sent to the model; its common prefix with the next prompt is served from the KV cache. */
+    @Volatile private var lastPrompt: String = ""
+
+    @Volatile private var lastBudget: EvidenceBudgetInfo? = null
+    override val lastBudgetInfo: EvidenceBudgetInfo? get() = lastBudget
 
     /** Serialises load / prompt preparation / generation / release, so a model switch can never interleave with a request. */
     private val modelMutex = Mutex()
@@ -85,9 +101,45 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
 
     private fun activeModelFile(): File? = runCatching { modelManager.getActiveModelFile() }.getOrNull()
 
-    /** Loads the active model so the first question does not pay the load time. Returns true when ready. */
+    /**
+     * Loads the active model so the first question does not pay the load time, then (once per phone and
+     * model) measures the best thread counts. A question arriving meanwhile interrupts the measurement,
+     * which is retried on the next warm-up. Returns true when the model is ready.
+     */
     suspend fun warmUp(): Boolean = withContext(Dispatchers.Default) {
-        modelMutex.withLock { runCatching { ensureLoaded() }.isSuccess }
+        modelMutex.withLock {
+            val ready = runCatching { ensureLoaded() }.isSuccess
+            if (ready && tuner.needsCalibration) {
+                runCatching { tuner.calibrate(llamaRunner::benchmark) }.onFailure { Log.w(TAG, "Calibration failed", it) }
+                llamaRunner.setThreads(tuner.threadPlan())
+                publishReady()
+            }
+            ready
+        }
+    }
+
+    /** Stops a background calibration so a user request does not wait for it. */
+    private fun preempt() {
+        tuner.interruptCalibration()
+        llamaRunner.interruptBenchmark()
+    }
+
+    /** Re-publishes the Ready state (e.g. after the speed mode changed). */
+    fun refreshStatus() = publishReady()
+
+    /** Human-readable CPU / thread / speed summary for messages. */
+    fun performanceSummary(): String = performanceLabel()
+
+    private fun publishReady() {
+        val file = activeModelFile() ?: return
+        if (!llamaRunner.isModelLoaded()) return
+        _loadState.value = LlmLoadState.Ready(displayName(file), llamaRunner.contextSize, LlamaNative.cpuVariant, performanceLabel())
+    }
+
+    private fun performanceLabel(): String {
+        val plan = tuner.threadPlan()
+        val state = if (tuner.profile.calibrated) "tuned" else "measuring on first use"
+        return "CPU ${tuner.topology.label} • threads ${plan.decode}/${plan.batch} ($state) • ${tuner.speedMode.label}"
     }
 
     /** Frees the native model (e.g. before its file is deleted or replaced). Waits for a running generation. */
@@ -132,17 +184,16 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
             throw IllegalStateException(reason)
         }
         val ctxSize = contextSizeByModel.getOrPut(file.absolutePath) { chooseContextSize() }
+        tuner.bind(file, LlamaNative.cpuVariant)
         if (llamaRunner.isModelLoaded() && llamaRunner.getLoadedModelPath() == file.absolutePath) {
-            if (_loadState.value !is LlmLoadState.Ready) {
-                _loadState.value = LlmLoadState.Ready(name, llamaRunner.contextSize, LlamaNative.cpuVariant)
-            }
+            if (_loadState.value !is LlmLoadState.Ready) publishReady()
             return
         }
 
         _loadState.value = LlmLoadState.Loading(name)
         modelManager.setGenerating(true) // the file must not be deleted while it is being mapped
         try {
-            if (!llamaRunner.loadModel(file.absolutePath, ctxSize, CpuInfo.performanceCores)) {
+            if (!llamaRunner.loadModel(file.absolutePath, ctxSize, tuner.threadPlan())) {
                 val reason = llamaRunner.getLastErrorMessage() ?: "Unable to initialize the local LLM. Check the model and device compatibility."
                 _loadState.value = LlmLoadState.Failed(name, reason)
                 throw IllegalStateException(reason)
@@ -157,8 +208,9 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
         hasNativeTemplate = llamaRunner.applyChatTemplate(listOf(ChatMessage("user", "ping"))) != null
         isReasoningModel = PromptBuilder.isReasoningModel(template, modelName + " " + file.name)
         promptOpensThinking = isReasoningModel && render(listOf(ChatMessage("user", "ping"))).trimEnd().endsWith("<think>")
-        _loadState.value = LlmLoadState.Ready(name, llamaRunner.contextSize, LlamaNative.cpuVariant)
-        Log.i(TAG, "Model ready: ${file.name} arch=$architecture n_ctx=${llamaRunner.contextSize} nativeTemplate=$hasNativeTemplate family=$templateFamily reasoning=$isReasoningModel")
+        lastPrompt = ""
+        publishReady()
+        Log.i(TAG, "Model ready: ${file.name} arch=$architecture n_ctx=${llamaRunner.contextSize} nativeTemplate=$hasNativeTemplate family=$templateFamily reasoning=$isReasoningModel ${performanceLabel()}")
     }
 
     private fun chooseContextSize(): Int {
@@ -185,7 +237,12 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
     override fun generationTimeoutMs(answerLength: AnswerLength): Long {
         // Generous for slow phones: ~3 tokens/s worst case plus prompt processing.
         val tokens = maxNewTokens(answerLength) + thinkingTokens()
-        return 90_000L + tokens * 330L
+        val base = 90_000L + tokens * 330L
+        // Phones measured slower than that get 1.5x their own expected time instead.
+        val decode = tuner.decodeTokensPerSecond() ?: return base
+        val prefill = tuner.prefillTokensPerSecond() ?: return base
+        val expectedSeconds = tokens / decode + tuner.targetPrefillSeconds() + (PerformanceTuner.MIN_EVIDENCE_TOKENS + 600) / prefill
+        return maxOf(base, (expectedSeconds * 1500).toLong())
     }
 
     private fun render(messages: List<ChatMessage>): String {
@@ -200,12 +257,41 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
     private fun countPromptTokens(prompt: String): Int =
         llamaRunner.countTokens(prompt, isPrompt = true) ?: ContextAssembler.estimateTokens(prompt)
 
+    private fun isSubOneBillionModel(): Boolean {
+        val file = activeModelFile() ?: return false
+        val modelName = (llamaRunner.metadata("general.name") ?: file.name).lowercase()
+        return "0.5b" in modelName || "500m" in modelName || "350m" in modelName || "0.6b" in modelName
+    }
+
+    /**
+     * Evidence tokens for the next grounded prompt: what fits in the context window, further capped so
+     * that prompt processing fits this device's measured speed and the [SpeedMode] target.
+     */
     override suspend fun availableEvidenceTokens(question: String, answerLength: AnswerLength): Int = withContext(Dispatchers.Default) {
+        preempt()
         modelMutex.withLock {
             ensureLoaded()
-            val skeleton = render(PromptBuilder.groundedMessages(emptyList(), question, answerLength, isBudgetLimited = true))
+            val isSub1B = isSubOneBillionModel()
+            val skeleton = render(PromptBuilder.groundedMessages(emptyList(), question, answerLength, isBudgetLimited = true, isSubOneBillion = isSub1B))
             val overhead = countPromptTokens(skeleton)
-            (contextWindow() - overhead - maxNewTokens(answerLength) - thinkingTokens() - SAFETY_MARGIN_TOKENS).coerceAtLeast(0)
+            val fit = (contextWindow() - overhead - maxNewTokens(answerLength) - thinkingTokens() - SAFETY_MARGIN_TOKENS).coerceAtLeast(0)
+
+            // The prompt start shared with the previous request comes from the KV cache and costs nothing.
+            val shared = lastPrompt.commonPrefixWith(skeleton)
+            val reusable = if (shared.isEmpty()) 0 else countPromptTokens(shared)
+            val thermal = tuner.thermalState()
+            val speedCap = tuner.evidenceTokenCap(overhead - reusable, thermal)
+            val budget = if (speedCap == null) fit else minOf(fit, speedCap)
+            lastBudget = EvidenceBudgetInfo(
+                contextFitTokens = fit,
+                speedCapTokens = speedCap,
+                prefillTokensPerSecond = tuner.prefillTokensPerSecond(),
+                targetSeconds = tuner.targetPrefillSeconds(thermal),
+                thermal = thermal.name,
+                speedMode = tuner.speedMode.name
+            )
+            Log.i(TAG, "Evidence budget $budget (fits $fit, speed cap ${speedCap ?: "unknown"}, reusable prefix $reusable, $thermal)")
+            budget
         }
     }
 
@@ -215,25 +301,28 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
         answerLength: AnswerLength,
         request: GenerationRequest
     ): String = withContext(Dispatchers.Default) {
+        preempt()
         modelMutex.withLock {
             ensureLoaded()
             val maxNew = maxNewTokens(answerLength) + thinkingTokens()
             val previous = request.previousTurn?.question
+            val isSub1B = isSubOneBillionModel()
             var blocks = context.sourceBlocks
-            var prompt = render(PromptBuilder.groundedMessages(blocks, question, answerLength, context.isBudgetLimited, previous))
+            var prompt = render(PromptBuilder.groundedMessages(blocks, question, answerLength, context.isBudgetLimited, previous, isSubOneBillion = isSub1B))
             // Final guard: the assembler budgets conservatively, but never send a prompt that cannot fit.
             while (blocks.size > 1 && countPromptTokens(prompt) + maxNew > contextWindow()) {
                 blocks = blocks.dropLast(1)
-                prompt = render(PromptBuilder.groundedMessages(blocks, question, answerLength, isBudgetLimited = true, previousQuestion = previous))
+                prompt = render(PromptBuilder.groundedMessages(blocks, question, answerLength, isBudgetLimited = true, previousQuestion = previous, isSubOneBillion = isSub1B))
             }
-            // Grounded answers are decoded greedily: deterministic and least likely to drift from the sources.
-            val answer = runInference(prompt, maxNewTokens(answerLength), temperature = 0f, request = request, repeatPenalty = GROUNDED_REPEAT_PENALTY)
+            // Grounded answers decode with mild stochastic temperature and repetition penalty to prevent sentence loops
+            val answer = runInference(prompt, maxNewTokens(answerLength), temperature = GROUNDED_TEMPERATURE, request = request, repeatPenalty = GROUNDED_REPEAT_PENALTY)
             PromptBuilder.sanitizeCitations(answer, blocks)
         }
     }
 
     override suspend fun generateChat(message: String, answerLength: AnswerLength, request: GenerationRequest): String =
         withContext(Dispatchers.Default) {
+            preempt()
             modelMutex.withLock {
                 ensureLoaded()
                 runInference(render(PromptBuilder.chatMessages(message, answerLength, request.previousTurn)), maxNewTokens(answerLength), CHAT_TEMPERATURE, request)
@@ -250,6 +339,9 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
     ): String {
         val token = request.token
         modelManager.setGenerating(true)
+        llamaRunner.setThreads(tuner.threadPlan())
+        lastPrompt = prompt
+        var completed = false
         try {
             request.onStarted?.invoke()
             val partial: ((String) -> Unit)? = request.onPartial?.let { cb ->
@@ -263,15 +355,19 @@ class GGUFLLM private constructor(private val context: Context) : LocalLLM {
             if (isReasoningModel && PromptBuilder.isStillThinking(raw, promptOpensThinking)) {
                 val forced = prompt + raw.trimEnd() + "\n</think>\n\n"
                 if (countPromptTokens(forced) + answerTokens <= contextWindow()) {
+                    lastPrompt = forced
                     val answer = llamaRunner.inference(forced, answerTokens, temperature, TOP_P, repeatPenalty, token, onPartial = request.onPartial)
                     raw = raw.trimEnd() + "\n</think>\n\n" + answer
                 }
             }
             val cleaned = PromptBuilder.cleanOutput(raw, promptOpensThinking)
             if (token.isCancelled) throw GenerationCancelledException(cleaned)
+            completed = true
             if (cleaned.isBlank()) throw IllegalStateException("Local neural model produced an empty answer.")
             return cleaned
         } finally {
+            // A cancelled or failed run clears the native KV cache, so nothing can be reused from it.
+            if (!completed) lastPrompt = ""
             modelManager.setGenerating(false)
         }
     }

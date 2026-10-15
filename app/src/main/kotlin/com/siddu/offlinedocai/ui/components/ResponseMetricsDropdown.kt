@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.siddu.offlinedocai.domain.model.ResponseMetrics
@@ -182,27 +183,8 @@ fun ResponseMetricsDropdown(
                     Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    MetricRow("Total Turnaround", totalSecStr, isPrimary = true)
-                    if (metrics.tokensPerSecond > 0) {
-                        MetricRow("Decoding Speed", "${String.format(Locale.US, "%.1f", metrics.tokensPerSecond)} tok/s (${metrics.generatedTokens} tokens in ${metrics.decodeMs}ms)")
-                    }
-                    if (metrics.ttftMs > 0) {
-                        MetricRow("Time-to-First-Token (TTFT)", "${metrics.ttftMs} ms")
-                    }
-                    if (metrics.intent != null) {
-                        MetricRow("Intent Routing", "${metrics.intentRoutingMs} ms (${metrics.intent})")
-                    }
-                    if (metrics.queryEmbeddingMs > 0) {
-                        MetricRow("Query Vector Embedding", "${metrics.queryEmbeddingMs} ms")
-                    }
-                    if (metrics.searchMs > 0) {
-                        MetricRow("Hybrid Search (Dense+BM25)", "${metrics.searchMs} ms (${metrics.candidateChunksCount} chunks)")
-                    }
-                    if (metrics.contextAssemblyMs > 0 || metrics.assembledTokens > 0) {
-                        MetricRow("Context Assembly", "${metrics.contextAssemblyMs} ms (${metrics.assembledTokens} tokens)")
-                    }
-                    if (!metrics.modelName.isNullOrBlank()) {
-                        MetricRow("Active Model", metrics.modelName)
+                    metrics.rows().forEachIndexed { index, (label, value) ->
+                        MetricRow(label, value, isPrimary = index == 0)
                     }
                 }
             }
@@ -221,12 +203,15 @@ private fun MetricRow(label: String, value: String, isPrimary: Boolean = false) 
     ) {
         Text(
             text = label,
+            modifier = Modifier.weight(0.42f),
             fontSize = 11.sp,
             color = if (isPrimary) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = if (isPrimary) FontWeight.SemiBold else FontWeight.Normal
         )
         Text(
             text = value,
+            modifier = Modifier.weight(0.58f).padding(start = 8.dp),
+            textAlign = TextAlign.End,
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = if (isPrimary) FontWeight.Bold else FontWeight.Medium,

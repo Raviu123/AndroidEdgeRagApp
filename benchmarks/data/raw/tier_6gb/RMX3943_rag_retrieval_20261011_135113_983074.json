@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 785.18,
+    "native_heap_mb": 121.21,
+    "java_heap_mb": 22.8,
+    "battery_temp_c": 37.3
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791706873101,
+    "query": "What security measures are recommended for network communication?",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 22,
+    "top_k_candidates": 22,
+    "filtered_chunks": 4,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 18,
+    "dense_search_ms": 21,
+    "bm25_search_ms": 10,
+    "rrf_fusion_ms": 10,
+    "context_assembly_ms": 53,
+    "total_retrieval_ms": 114,
+    "assembled_tokens": 602,
+    "budget_tokens": 810
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 1259.14,
+    "native_heap_mb": 78.51,
+    "java_heap_mb": 22.99,
+    "battery_temp_c": 41.0
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791713379050,
+    "query": "What security considerations apply to cryptographic keys?",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 23,
+    "top_k_candidates": 23,
+    "filtered_chunks": 4,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 2,
+    "query_embedding_ms": 20,
+    "dense_search_ms": 9,
+    "bm25_search_ms": 4,
+    "rrf_fusion_ms": 4,
+    "context_assembly_ms": 36,
+    "total_retrieval_ms": 76,
+    "assembled_tokens": 492,
+    "budget_tokens": 600
+  }
+}

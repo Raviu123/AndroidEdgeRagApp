@@ -31,6 +31,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -127,6 +129,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             documentRepository.reindexStaleDocuments()
             if (modelManager.getActiveModel() != null) llm.warmUp()
         }
+        // A question during start-up interrupts the speed measurement; retry once the app has been idle a while.
+        viewModelScope.launch {
+            chatRepository.chatState.collectLatest { state ->
+                if (state is ChatRepository.ChatState.Idle && llm.tuner.needsCalibration && llm.loadedModelPath() != null) {
+                    delay(CALIBRATION_IDLE_DELAY_MS)
+                    launch(Dispatchers.Default) { llm.warmUp() }
+                }
+            }
+        }
+    }
+
+    private companion object {
+        const val CALIBRATION_IDLE_DELAY_MS = 8_000L
     }
 
     enum class ThemeMode { SYSTEM, LIGHT, DARK }
@@ -269,6 +284,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         LlamaNative.setCompatibilityModePreferred(getApplication(), enabled)
         _compatibilityPreferred.value = enabled
         _userMessage.value = "Restart the app to apply this setting."
+    }
+
+    // --- Answer speed (device-adaptive performance) -------------------------------------------------
+
+    private val _speedMode = MutableStateFlow(llm.tuner.speedMode)
+    val speedMode: StateFlow<com.siddu.offlinedocai.ai.llm.SpeedMode> = _speedMode.asStateFlow()
+
+    fun setSpeedMode(mode: com.siddu.offlinedocai.ai.llm.SpeedMode) {
+        llm.tuner.speedMode = mode
+        _speedMode.value = mode
+        llm.refreshStatus()
+    }
+
+    /** Forgets this phone's measured thread counts / speeds for the active model and measures again. */
+    fun remeasureSpeed() {
+        if (modelManager.getActiveModel() == null) return
+        llm.tuner.resetCalibration()
+        _userMessage.value = "Measuring this phone's speed… (a few seconds; asking a question stops it)"
+        viewModelScope.launch(Dispatchers.Default) {
+            llm.warmUp()
+            _userMessage.value = if (llm.tuner.profile.calibrated) "Speed measured: ${llm.performanceSummary()}" else "Speed measurement was interrupted; it will retry later."
+        }
     }
 
     // --- Chat ---------------------------------------------------------------------------------------

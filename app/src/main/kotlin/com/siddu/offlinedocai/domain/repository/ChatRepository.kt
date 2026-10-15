@@ -194,14 +194,7 @@ class ChatRepository(
                 val chatText = llm.generateChat(userText, answerLength, request)
                 val inf = llm.lastInferenceMetrics
                 val chatMetrics = inf?.let {
-                    com.siddu.offlinedocai.domain.model.ResponseMetrics(
-                        totalDurationMs = it.totalGenerationMs,
-                        modelName = it.modelName,
-                        ttftMs = it.ttftMs,
-                        decodeMs = it.decodeMs,
-                        generatedTokens = it.generatedTokens,
-                        tokensPerSecond = it.tokensPerSecond
-                    ).toJson()
+                    withInference(com.siddu.offlinedocai.domain.model.ResponseMetrics(totalDurationMs = it.totalGenerationMs), it).toJson()
                 }
                 Reply(chatText, sources = null, metrics = chatMetrics)
             } else {
@@ -272,6 +265,24 @@ class ChatRepository(
     }
 
     private data class Reply(val text: String, val sources: String?, val metrics: String? = null)
+
+    /** Adds the generation, prompt-processing and CPU figures of [inf] to [base]. */
+    private fun withInference(base: com.siddu.offlinedocai.domain.model.ResponseMetrics, inf: com.siddu.offlinedocai.ai.llm.LlamaRunner.InferenceMetrics) =
+        base.copy(
+            modelName = inf.modelName,
+            ttftMs = inf.ttftMs,
+            decodeMs = inf.decodeMs,
+            generatedTokens = inf.generatedTokens,
+            tokensPerSecond = inf.tokensPerSecond,
+            promptTokens = inf.promptTokens,
+            reusedPromptTokens = inf.reusedPromptTokens,
+            prefillMs = inf.prefillMs,
+            prefillTokensPerSecond = inf.prefillTokensPerSecond,
+            threadsDecode = inf.threadsDecode,
+            threadsBatch = inf.threadsBatch,
+            cpuVariant = com.siddu.offlinedocai.ai.llm.LlamaNative.cpuVariant.ifBlank { null },
+            cpuTopology = com.siddu.offlinedocai.ai.llm.CpuTopology.device.label
+        )
 
     private suspend fun answerFromDocuments(question: String, requestedIds: List<Long>, answerLength: AnswerLength, request: GenerationRequest): Reply {
         val modelId = embedder.modelId
@@ -357,8 +368,8 @@ class ChatRepository(
         val answer = llm.generateGrounded(assembled, question, answerLength, request)
         val sources = if (PromptBuilder.isNotFoundAnswer(answer)) null else assembled.sourcesJson
         val totalEndToEndMs = android.os.SystemClock.elapsedRealtime() - retrievalOverallStart
-        val inf = llm.lastInferenceMetrics
-        val metricsObj = com.siddu.offlinedocai.domain.model.ResponseMetrics(
+        val budgetInfo = llm.lastBudgetInfo
+        val retrievalMetrics = com.siddu.offlinedocai.domain.model.ResponseMetrics(
             totalDurationMs = totalEndToEndMs,
             intent = classification.intent.name,
             intentRoutingMs = routeMs,
@@ -368,12 +379,13 @@ class ChatRepository(
             totalRetrievalMs = totalRetrievalMs,
             candidateChunksCount = results.size,
             assembledTokens = assembled.usedTokens,
-            modelName = inf?.modelName,
-            ttftMs = inf?.ttftMs ?: 0L,
-            decodeMs = inf?.decodeMs ?: 0L,
-            generatedTokens = inf?.generatedTokens ?: 0,
-            tokensPerSecond = inf?.tokensPerSecond ?: 0.0
+            budgetTokens = budget,
+            budgetContextFitTokens = budgetInfo?.contextFitTokens ?: available,
+            budgetSpeedCapTokens = budgetInfo?.speedCapTokens ?: 0,
+            speedMode = budgetInfo?.speedMode,
+            thermal = budgetInfo?.thermal
         )
+        val metricsObj = llm.lastInferenceMetrics?.let { withInference(retrievalMetrics, it) } ?: retrievalMetrics
         return Reply(answer, sources, metrics = metricsObj.toJson())
     }
 

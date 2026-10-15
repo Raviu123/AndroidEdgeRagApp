@@ -15,11 +15,12 @@ fun interface NativeTextListener {
  * GGUF embedding model.
  *
  * On arm64 every Android CPU variant of the ggml CPU backend is shipped; the native side loads the
- * best one the CPU supports. **Compatibility mode** forces the baseline (ARMv8.0) variant. It is
- * enabled automatically on chips known to crash with the optimised kernels (MediaTek Helio
- * MT676x/677x/678x, see the `ravi` branch fix dc9cbf7), automatically after a native crash during
- * model load or first generation (crash sentinel), or manually from Settings. Changes take effect
- * after the app restarts, because a CPU backend cannot be swapped once loaded.
+ * best one the CPU supports (a variant whose features the CPU lacks refuses to load). **Compatibility
+ * mode** forces the baseline (ARMv8.0) variant. It is enabled automatically after a native crash
+ * during model load, calibration or generation (crash sentinel), or manually from Settings. On
+ * MediaTek Helio MT676x/677x/678x chips (crash history with another library, fix dc9cbf7) the
+ * sentinel stays armed for every run. Changes take effect after the app restarts, because a CPU
+ * backend cannot be swapped once loaded.
  */
 object LlamaNative {
     private const val TAG = "LlamaNative"
@@ -40,6 +41,9 @@ object LlamaNative {
         private set
     /** Why compatibility mode was switched on automatically (shown once in Settings). */
     @Volatile var compatibilityReason: String? = null
+        private set
+    /** True on chips with a history of native crashes: every model run keeps the crash sentinel armed. */
+    @Volatile var alwaysGuarded = false
         private set
 
     private var sentinelFile: File? = null
@@ -62,10 +66,13 @@ object LlamaNative {
                     .apply()
             }
         }
-        val blocklisted = isKnownUnstableChip()
-        compatibilityModeActive = prefs.getBoolean(KEY_COMPAT_MODE, false) || blocklisted
+        // Helio chips are no longer forced onto the slow baseline kernels: the crash reported for them came
+        // from a different library (llama.rn), and ggml only loads a CPU variant whose features the chip
+        // reports. As a safety net every model run on these chips keeps the crash sentinel armed, so a
+        // native crash switches compatibility mode on for the next launch.
+        alwaysGuarded = isKnownUnstableChip()
+        compatibilityModeActive = prefs.getBoolean(KEY_COMPAT_MODE, false)
         compatibilityReason = prefs.getString(KEY_COMPAT_REASON, null)
-            ?: if (blocklisted) "This chip (MediaTek Helio) is known to crash with the optimised CPU kernels." else null
 
         return try {
             System.loadLibrary("llama_jni")
@@ -133,21 +140,14 @@ object LlamaNative {
         handle: Long, prompt: ByteArray, maxTokens: Int, temperature: Float, topP: Float,
         repeatPenalty: Float, seed: Int, listener: NativeTextListener?
     ): ByteArray
+    @JvmStatic external fun nativeSetThreads(handle: Long, threadsDecode: Int, threadsBatch: Int)
+    /** [promptTokens, reusedTokens, prefillMs, firstTokenMs, decodeMs, generatedTokens, threadsDecode, threadsBatch] of the last inference. */
+    @JvmStatic external fun nativeLastStats(handle: Long): LongArray?
+    /** [prefillMs, decodeMs] of a synthetic run, or null if it failed or was cancelled. */
+    @JvmStatic external fun nativeBenchmark(handle: Long, promptTokens: Int, genTokens: Int, threadsDecode: Int, threadsBatch: Int): LongArray?
 
     @JvmStatic external fun nativeEmbedInit(modelPath: ByteArray, contextSize: Int, threadCount: Int): Long
     @JvmStatic external fun nativeEmbedFree(handle: Long)
     @JvmStatic external fun nativeEmbedDim(handle: Long): Int
     @JvmStatic external fun nativeEmbed(handle: Long, text: ByteArray): FloatArray?
-}
-
-/** Number of "performance" cores (excludes the slowest cluster on big.LITTLE CPUs), clamped to 2..6. */
-object CpuInfo {
-    val performanceCores: Int by lazy {
-        val total = Runtime.getRuntime().availableProcessors()
-        val freqs = (0 until total).mapNotNull { i ->
-            runCatching { File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq").readText().trim().toLong() }.getOrNull()
-        }
-        val count = if (freqs.size == total && freqs.distinct().size > 1) freqs.count { it > freqs.minOrNull()!! } else total / 2
-        count.coerceIn(2, 6).coerceAtMost(maxOf(2, total))
-    }
 }

@@ -9,9 +9,9 @@
 ## 1. Experimental Matrix
 
 ### A. Device Hardware Tiers
-| Tier | Target Specs | Typical SoCs | Role in Experiment | Context Budget (`n_ctx`) |
+| Tier | Target Specs | Typical SoCs | Role in Experiment | Context Window (`n_ctx`)* |
 |---|---|---|---|---|
-| **Tier 1 (Budget)** | **4 GB RAM** | MediaTek Helio G-series / Snapdragon 680 | Stress test: OOM vulnerability, low-memory stability, CPU throttling | 2,048 tokens |
+| **Tier 1 (Budget)** | **4 GB RAM** | MediaTek Helio G-series / Snapdragon 680 | Stress test: OOM vulnerability, low-memory stability, CPU throttling | 4,096 if the phone reports ≥ 3.4 GB (most "4 GB" phones), else 2,048 |
 | **Tier 2 (Mid-Range)** | **6 GB RAM** | Snapdragon 7s Gen 2 / Dimensity 7050 | Sweet spot: Daily commodity device performance | 4,096 tokens |
 | **Tier 3 (Flagship)** | **8 GB+ RAM** | Snapdragon 8 Gen 2/3 / Dimensity 9200+ | Peak capability: Optimal TTFT and token generation speed | 4,096 tokens |
 
@@ -22,7 +22,16 @@
 
 ### C. Embedding & Ingestion Engine
 * **ONNX Runtime Mobile:** `all-MiniLM-L6-v2` (384-dimensional normalized dense vectors).
-* **Chunking Policy:** WordPiece tokenizer-aligned (160 target tokens / 200 max tokens).
+* **Chunking Policy:** WordPiece tokenizer-aligned (128 target tokens / 180 max tokens, ≤ 32-token sentence overlap).
+
+\* `n_ctx` is chosen from total RAM (`GGUFLLM.chooseContextSize`). The **evidence budget** inside it is device-adaptive: `min(context fit, intent cap, measured prompt speed × Speed-Mode seconds)`, floored at 600 tokens. Record it per run (`Evidence Budget` row / `budget_tokens`).
+
+### D. Device-Adaptive Inference (record for every device)
+* **Thread counts** are calibrated once per phone + model + CPU kernels (`PerformanceTuner`): generation threads and prompt-processing threads are measured separately from candidates derived from the CPU layout (`CpuTopology`, e.g. `2+6`, `1+3+4`). Log `threads_decode` / `threads_batch`, `cpu_topology`, `cpu_variant`.
+* **Prompt prefix reuse:** the KV cache of the shared prompt start is reused between questions (`reused_prompt_tokens`). For cold-start measurements, restart the app before each run.
+* **Speed Mode** (Settings → Answer speed) sets the prompt-processing target: Fastest 20 s, Balanced 35 s, Thorough 75 s. Keep it fixed (Balanced) across devices.
+* **Thermal / battery saver** reduce threads and budget automatically (`thermal` field); note the phone's temperature state and keep battery saver off.
+* Use a **release build**; debug builds are not representative.
 * **Retrieval Policy:** Dual-channel Dense Top-50 + BM25 Top-50 $\rightarrow$ Reciprocal Rank Fusion (RRF, $k=60$).
 
 ---
@@ -87,7 +96,7 @@ For every test run (Device $\times$ Model $\times$ Query), record the following:
 ### A. Latency & Throughput Metrics
 * **Document Ingestion Time ($T_{\text{ingest}}$):** Total seconds to extract, chunk, and embed document vectors into Room DB.
 * **Retrieval Time ($T_{\text{ret}}$):** Milliseconds to compute Dense cosine + BM25 scores + RRF ranking.
-* **Time-to-First-Token ($\text{TTFT}$):** Milliseconds from prompt assembly submission to the generation of the first token (prefill time).
+* **Time-to-First-Token ($\text{TTFT}$):** Milliseconds from the start of the generation call to the first sampled token (includes prefill). Also report **prefill speed** (`prefill_tokens_per_second` = new prompt tokens / prefill time).
 * **Decode Speed ($S_{\text{gen}}$):** Output generation speed measured in `tokens/second`.
 * **Total Response Latency ($T_{\text{total}}$):** Wall-clock time from query submission to generation completion.
 

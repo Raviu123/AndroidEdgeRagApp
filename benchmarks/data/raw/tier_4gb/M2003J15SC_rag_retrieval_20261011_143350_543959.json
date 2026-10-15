@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 1191.65,
+    "native_heap_mb": 96.77,
+    "java_heap_mb": 16.33,
+    "battery_temp_c": 40.4
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791709428664,
+    "query": "What does MASVS recommend for protecting data transmitted over a network?",
+    "intent": "GENERAL",
+    "document_ids": "3",
+    "total_corpus_chunks": 23,
+    "top_k_candidates": 23,
+    "filtered_chunks": 3,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 30,
+    "dense_search_ms": 11,
+    "bm25_search_ms": 5,
+    "rrf_fusion_ms": 5,
+    "context_assembly_ms": 48,
+    "total_retrieval_ms": 103,
+    "assembled_tokens": 465,
+    "budget_tokens": 600
+  }
+}

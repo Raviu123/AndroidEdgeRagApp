@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 1262.25,
+    "native_heap_mb": 83.29,
+    "java_heap_mb": 22.34,
+    "battery_temp_c": 40.5
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791713000724,
+    "query": "What does MASVS recommend for protecting data transmitted over a network?",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 23,
+    "top_k_candidates": 23,
+    "filtered_chunks": 3,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 19,
+    "dense_search_ms": 14,
+    "bm25_search_ms": 7,
+    "rrf_fusion_ms": 7,
+    "context_assembly_ms": 28,
+    "total_retrieval_ms": 78,
+    "assembled_tokens": 465,
+    "budget_tokens": 600
+  }
+}

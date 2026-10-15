@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 791.82,
+    "native_heap_mb": 53.83,
+    "java_heap_mb": 22.13,
+    "battery_temp_c": 38.6
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791707255658,
+    "query": "How do secure data storage and cryptography work together to protect sensitive information?",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 22,
+    "top_k_candidates": 22,
+    "filtered_chunks": 5,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 2,
+    "query_embedding_ms": 24,
+    "dense_search_ms": 13,
+    "bm25_search_ms": 6,
+    "rrf_fusion_ms": 6,
+    "context_assembly_ms": 91,
+    "total_retrieval_ms": 145,
+    "assembled_tokens": 606,
+    "budget_tokens": 816
+  }
+}

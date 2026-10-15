@@ -161,8 +161,12 @@ class VectorStore(private val chunkDao: ChunkDao) {
         for (term in queryTerms) {
             val tf = chunk.termFreq[term] ?: continue
             val df = docFreq[term] ?: continue
-            val idf = ln(1.0 + (n - df + 0.5) / (df + 0.5))
-            score += idf * (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * (1 - BM25_B + BM25_B * chunk.length / avgLength))
+            val idf = max(0.0, ln(1.0 + (n - df + 0.5) / (df + 0.5)))
+            // Quadratic IDF scaling emphasizes rare discriminative keywords (e.g. "network", "keys", "session")
+            // over generic document vocabulary ("data", "protecting")
+            val queryWeight = idf * idf
+            val tfWeight = (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * (1 - BM25_B + BM25_B * chunk.length / avgLength))
+            score += queryWeight * tfWeight
         }
         return score
     }
@@ -253,7 +257,10 @@ class VectorStore(private val chunkDao: ChunkDao) {
     }
 
     private suspend fun buildIndex(docId: Long, signature: ChunkSignature): IndexedDocument {
-        val entities = chunkDao.getAllChunksForDocument(docId)
+        val rawEntities = chunkDao.getAllChunksForDocument(docId)
+        val entities = rawEntities.filterNot {
+            com.siddu.offlinedocai.ai.chunking.TextChunker.isTableOfContents(it.text, it.sectionTitle)
+        }
         val docFreq = HashMap<String, Int>()
         val indexed = entities.map { entity ->
             val terms = TextAnalyzer.terms(listOfNotNull(entity.sectionTitle, entity.text).joinToString("\n"))

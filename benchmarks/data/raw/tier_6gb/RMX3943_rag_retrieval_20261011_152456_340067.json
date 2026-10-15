@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 1260.57,
+    "native_heap_mb": 81.88,
+    "java_heap_mb": 22.75,
+    "battery_temp_c": 39.6
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791712495418,
+    "query": "What security measures should be used for user authentication?small paragraph anwer",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 21,
+    "top_k_candidates": 21,
+    "filtered_chunks": 3,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 9,
+    "dense_search_ms": 22,
+    "bm25_search_ms": 11,
+    "rrf_fusion_ms": 11,
+    "context_assembly_ms": 40,
+    "total_retrieval_ms": 97,
+    "assembled_tokens": 406,
+    "budget_tokens": 600
+  }
+}

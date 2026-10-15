@@ -17,7 +17,7 @@ object BenchmarkTelemetry {
      * Set to true when collecting research evaluation data.
      * Set to false for standard production usage (zero logging overhead).
      */
-    var ENABLED: Boolean = false
+    var ENABLED: Boolean = true
 
     /**
      * Records end-to-end ingestion pipeline metrics.
@@ -113,7 +113,14 @@ object BenchmarkTelemetry {
         decodeMs: Long,
         totalGenerationMs: Long,
         tokensPerSecond: Double,
-        isCancelled: Boolean = false
+        isCancelled: Boolean = false,
+        reusedPromptTokens: Int = 0,
+        prefillMs: Long = 0L,
+        prefillTokensPerSecond: Double = 0.0,
+        threadsDecode: Int = 0,
+        threadsBatch: Int = 0,
+        cpuVariant: String = "",
+        cpuTopology: String = ""
     ) {
         if (!ENABLED) return
         val json = JSONObject().apply {
@@ -122,6 +129,13 @@ object BenchmarkTelemetry {
             put("model_name", modelName)
             put("context_size", contextSize)
             put("prompt_tokens", promptTokens)
+            put("reused_prompt_tokens", reusedPromptTokens)
+            put("prefill_ms", prefillMs)
+            put("prefill_tokens_per_second", prefillTokensPerSecond)
+            put("threads_decode", threadsDecode)
+            put("threads_batch", threadsBatch)
+            put("cpu_variant", cpuVariant)
+            put("cpu_topology", cpuTopology)
             put("generated_tokens", generatedTokens)
             put("ttft_ms", ttftMs)
             put("decode_ms", decodeMs)

@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "ZN5223G85S",
+    "brand": "motorola",
+    "model": "moto g67 power 5G",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "parrot",
+    "total_ram_mb": 7462.3,
+    "total_ram_gb": 7.29,
+    "ram_tier": "tier_8gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 2171.73,
+    "native_heap_mb": 1125.99,
+    "java_heap_mb": 20.47,
+    "battery_temp_c": 34.0
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791710913104,
+    "query": "What security measures are recommended for network communication?",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 22,
+    "top_k_candidates": 22,
+    "filtered_chunks": 5,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 0,
+    "query_embedding_ms": 9,
+    "dense_search_ms": 3,
+    "bm25_search_ms": 1,
+    "rrf_fusion_ms": 1,
+    "context_assembly_ms": 55,
+    "total_retrieval_ms": 70,
+    "assembled_tokens": 1365,
+    "budget_tokens": 2000
+  }
+}

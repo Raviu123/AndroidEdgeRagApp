@@ -1,0 +1,35 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 784.27,
+    "native_heap_mb": 131.2,
+    "java_heap_mb": 29.55,
+    "battery_temp_c": 36.1
+  },
+  "telemetry_data": {
+    "event_type": "DOCUMENT_INGESTION",
+    "timestamp_epoch_ms": 1791706766358,
+    "document_id": 1,
+    "document_name": "OWASP_MASVS.pdf",
+    "file_size_bytes": 1016447,
+    "page_count": 35,
+    "chunk_count": 172,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "extraction_ms": 2809,
+    "chunking_ms": 441,
+    "embedding_ms": 5362,
+    "db_insert_ms": 75,
+    "total_ingest_ms": 8711,
+    "throughput_pages_per_sec": 4.017908391688669,
+    "throughput_chunks_per_sec": 32.07758299142111
+  }
+}

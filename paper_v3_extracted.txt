@@ -1,0 +1,219 @@
+﻿OfflineDocAI: An Efficient End-to-End On-Device Retrieval-Augmented Generation System for Edge Hardware
+Ravinarayana U
+St.Aloysius Institute Of Management and Information Technology(AIMIT) Mangalore,Karnataka 
+Ravinarayanau2@gmail.com
+Siddhartha Bhat S
+St.Aloysius Institute Of Management and Information Technology(AIMIT) Mangalore,Karnataka 
+Siddusbs2810@gmail.com
+AbstractΓÇö AbstractΓÇöRetrieval-augmented generation (RAG) usually relies on cloud servers, making it unsuitable for confidential documents or environments with unreliable network access. This paper presents OfflineDocAI, an Android application that executes the complete RAG pipeline entirely on-device with zero network data egress: document parsing, structure-aware chunking, ONNX-based embedding, hybrid dense and BM25 retrieval fused by Reciprocal Rank Fusion (RRF), adaptive context assembly, and answer generation using quantized small language models via llama.cpp. We evaluate OfflineDocAI on three commodity smartphones (4 GB, 6 GB, and 8 GB RAM) using a 35-page PDF across 18 generation runs per model and device. Document ingestion completed in 5.9ΓÇô14.1 s, with a mean retrieval latency of 79ΓÇô186 ms. Decoding achieved 8.2ΓÇô19.4 tokens/s for Qwen 2.5 (0.5B) and 3.7ΓÇô10.7 tokens/s for Llama 3.2 (1B), maintaining a modest mean peak memory footprint of 0.77ΓÇô1.99 GB. Time-to-first-token (14.7ΓÇô54.1 s), driven by prompt prefill, represented the primary system bottleneck. Our results demonstrate that fully private, performant document question answering is practical on consumer-grade mobile devices.
+KeywordsΓÇöRetrieval-Augmented Generation, On-Device AI, Edge Computing, Small Language Models, Hybrid Retrieval, Reciprocal Rank Fusion, Privacy-Preserving AI, Android, llama.cpp
+I. INTRODUCTION
+A. Background of the Study
+Large language models (LLMs) answer questions fluently, but they cannot see a user's private documents and may produce statements that are not supported by any source. Retrieval-augmented generation (RAG) [1], [2] addresses both problems: relevant passages are retrieved from a document collection and the model is asked to answer using only those passages. In most deployments the embedding model, the vector database and the LLM all run on remote servers.
+B. Research Problem
+Sending documents to a server is a problem for people who work with confidential material, such as legal, medical or internal company documents, and for people with limited or no connectivity. Running RAG on a phone avoids this, but the phone imposes hard limits: a few gigabytes of RAM shared with the operating system, CPU-only inference on most devices, thermal limits, and small models with short context windows. Existing on-device work usually optimises one stage, such as the vector index [3], [4], document selection [5] or processor scheduling [6], and is often evaluated on a single device or on a laptop [7].
+C. Significance of the Study
+A complete on-device pipeline keeps documents on the device, works offline and has no per-query cost. Measurements on real budget and mid-range phones also show where time and memory are actually spent, which tells developers which stage is worth optimising.
+D. Research Gap
+Few published systems cover the whole path from a raw PDF or DOCX file to a cited answer on a phone, and fewer report the measured cost of every stage (ingestion, retrieval, prompt processing, decoding, memory and temperature) across different hardware tiers.
+E. Objectives and Research Questions
+The objective of this study is to design, implement and measure a complete on-device RAG system for Android. The study addresses four research questions:
+RQ1: Can document ingestion (parsing, chunking, embedding and storage) run on commodity phones in acceptable time?
+RQ2: How much latency does hybrid dense and BM25 retrieval with Reciprocal Rank Fusion add on such phones?
+RQ3: What decoding speed, time-to-first-token (TTFT) and memory do quantized 0.5BΓÇô1.5B models reach on 4 GB, 6 GB and 8 GB devices?
+RQ4: Which stage dominates the response time, and how does this change with the hardware tier?
+F. Scope of the Study
+The study covers Android phones, English documents with a text layer (PDF, DOCX and TXT), CPU inference, three small language models (Qwen 2.5 0.5B and 1.5B [8], Llama 3.2 1B [9]) and three phones, one per RAM tier. Answer quality (citation accuracy, faithfulness) was not scored in this round of experiments. The contributions of the paper are:
+A working Android application that runs ingestion, embedding, hybrid retrieval, context assembly and generation fully on the device.
+A device-adaptive inference layer that calibrates CPU thread counts per phone and sizes the retrieved evidence from the measured prompt-processing speed.
+A measurement study on three phones (4, 6 and 8 GB RAM) reporting per-stage latency, throughput, memory and temperature.
+II. REVIEW OF LITERATURE
+A. Retrieval-Augmented Generation and Retrieval Methods
+Lewis et al. [1] introduced RAG, and Gao et al. [2] survey its variants. Dense retrieval represents queries and passages as vectors [10]; Sentence-BERT [11] made sentence embeddings practical, and MiniLM [12] showed that small distilled transformers keep most of the quality at a fraction of the cost. Lexical ranking with BM25 [13] remains strong for exact terms, numbers and rare words, which dense models often miss. Reciprocal Rank Fusion (RRF) [14] merges ranked lists using only rank positions, so scores from different retrievers do not need to be calibrated. Liu et al. [15] showed that models use information in the middle of long contexts poorly, which supports giving small models short, relevant context.
+B. On-Device Language Model Inference
+MobileLLM [16] showed that carefully designed sub-billion-parameter models are useful for on-device tasks, and LLM in a flash [17] studied running models whose weights exceed DRAM by streaming them from flash storage. The llama.cpp project [18] provides CPU inference for quantized GGUF models and is widely used on phones. Open models such as Qwen 2.5 [8] and Llama 3.2 [9] are available at 0.5BΓÇô1.5B parameters.
+C. On-Device and Edge RAG Systems
+EdgeRAG [3] and MobileRAG [4] focus on making the vector index fit in memory and on reducing the text passed to the model. Loo et al. [19] use RAG to guide mobile app automation rather than document question answering. SRAS [5] trains a compact reinforcement-learning policy to select documents. Pocket RAG [20] targets first-aid guidance within a 2 GB memory budget. RAGdb [7] packs ingestion and hybrid retrieval into one SQLite file, evaluated on a laptop. HeRo [6] schedules agentic RAG across CPU, GPU and NPU, and SmartRAG [21] builds an on-device knowledge graph for multi-hop questions.
+D. Security of Document-Based Prompts
+Greshake et al. [22] showed that text retrieved from documents can carry hidden instructions that hijack an LLM (indirect prompt injection). Any RAG system that places document text in the prompt must handle this risk.
+E. Need for the Present Study
+Prior work either optimises one stage in isolation or targets a fixed domain or a laptop. There is little measured evidence of how a complete document RAG pipeline, from raw file to cited answer, behaves on ordinary phones of different RAM tiers. This study fills that gap with an implemented system and per-stage measurements on three devices.
+III. RESEARCH METHODOLOGY
+A. Research Design and Approach
+The study follows a design-and-evaluate approach: the system was built and then evaluated quantitatively in controlled experiments on physical phones. The analysis is descriptive and comparative across devices and models.
+B. System Architecture
+Fig. 1 shows the five stages of OfflineDocAI. All stages run inside one Android application written in Kotlin, with a C++ native library for model inference. The only network use in the application is the optional one-time download of model files; documents, queries and answers never leave the device.
+Fig. 1. Architecture of OfflineDocAI. All five stages execute on the phone.
+1) Document ingestion. PDF files are read page by page with PDFBox-Android. Text fragments are grouped into lines by their baseline, and pages with two columns are detected from the vertical gap between columns and re-ordered into reading order. DOCX files are read with Apache POI, with heading styles kept as headings; plain text is read directly. Each page is split into four block types: heading, list item, table row and paragraph. Paragraphs split by a page break are re-joined. Blocks are packed into chunks with a target of 128 and a maximum of 180 Word Piece tokens, with a 32-token overlap; a new heading always starts a new chunk. Each chunk keeps its page span and section title for citation.
+2) Embedding and storage. Each chunk is embedded with all-MiniLM-L6-v2 (INT8, ONNX Runtime) using a maximum sequence length of 256, mean pooling and L2 normalisation, giving a 384-dimensional vector. Vectors are stored as 1,536-byte binary fields in a SQLite database (Android Room) together with the document, page, chunk index, section title and embedding model identifier. Vectors produced by different embedding models are never compared.
+3) Query routing. A rule-based router assigns each question to one of six intents: PAGE_LOOKUP, PAGE_RANGE, SUMMARY, COMPARISON, ENUMERATION or GENERAL. Page intents fetch the requested pages directly, SUMMARY samples 24 chunks evenly across the document, and the other intents use hybrid search. For COMPARISON, each side of the comparison is also searched as a sub-query, and short follow-up questions are combined with the previous question.
+4) Hybrid retrieval. Chunks are retrieved in two ways. Dense search ranks chunks by the dot product of query and chunk vectors (equal to cosine similarity, since vectors are unit length). Chunks scoring at least 0.20 are ranked and the top 50 kept. In parallel, Okapi BM25 [13] (kΓéü = 1.2, b = 0.75) ranks chunks by keyword match. Query words missing from the document are first mapped to the closest indexed term to tolerate spelling mistakes. The two top-50 lists are merged with Reciprocal Rank Fusion (RRF) [14]:
+RRF(c) = Γêæ 1 / (60 + r_L(q,c)) (1)
+summed over both lists and over the question and any sub-queries, where r_L(q,c) is the 1-based rank of chunk c in list L. The top 20 chunks are kept (40 for ENUMERATION), and the neighbours of the top three are added with half their score to restore context. If no chunk passes the similarity floor and none shares at least half of the question's terms, the app answers "I couldn't find this in the selected document(s)." without running the language model.
+5) Context assembly and generation. The evidence placed in the prompt is limited by a token budget B: 
+B = min(B_fit, B_intent, max(600, S_p ┬╖ T ΓêÆ P_other)) (2)
+where B_fit is the space left in the context window, and B_intent is 2,000 tokens for GENERAL and 2,400 for other intents. S_p ┬╖ T is the number of tokens the phone can process in the target time T (20, 35 or 75 s depending on speed mode, cut to 75% or 50% under thermal pressure). S_p is a moving average of measured speed (╬▒ = 0.3), and P_other is the count of other new prompt tokens. Chunks are added in priority order until the budget is full. Adjacent chunks from the same document are merged, repeated overlap (up to three sentences) is removed, and each block is labelled like [Source 2, Page 7].
+Generation uses llama.cpp [18] via JNI with Q4_K_M GGUF models. The context window is 4,096 tokens on devices with at least 3.4 GB of RAM, otherwise 2,048. Decoding is greedy (temperature 0) with a repetition penalty of 1.03 and a limit of 640 new tokens. The model stays loaded between questions, and the keyΓÇôvalue cache of the shared prompt prefix is reused. Thread counts are calibrated once per phone and model by timing candidates, and fewer threads are used when the phone is hot or in battery saver. Because document text is untrusted [22], control markers in it (e.g. <|im_start|>, [INST], <think>) are replaced with look-alike characters. After generation, citation tags are checked against the sources actually provided and normalised.
+If you need it even shorter, the next cuts would be the thread-calibration detail and the exact prompt-overlap rule. If a reviewer asks for the BM25 equations, you can restore them as an appendix.
+C. Study Area and Context
+The experiments were run in a laboratory setting on three Android phones connected to a computer over USB, each representing a common RAM tier (Table II). All phones ran the same release build of the application with the Balanced speed mode, and all used a 4,096-token context window.
+Table II: Devices used in the evaluation
+RAM tier
+Device (model code)
+SoC platform
+Models tested
+4 GB
+Xiaomi Redmi Note 9 (M2003J15SC)
+MediaTek MT6768
+Qwen 2.5 0.5B, Llama 3.2 1B
+6 GB
+Realme RMX3943
+MediaTek MT6835
+Qwen 2.5 0.5B, Llama 3.2 1B
+8 GB
+Motorola moto g67 power 5G
+Qualcomm (parrot)
+Qwen 2.5 0.5B, Llama 3.2 1B, Qwen 2.5 1.5B
+D. Population, Sample and Sampling Technique
+The population of interest is Android smartphones with 4ΓÇô8 GB of RAM, which covers most budget and mid-range devices. Purposive sampling was used to select one phone per RAM tier. The test document was the OWASP Mobile Application Security Verification Standard [23], a public 35-page PDF (992.6 KB) that produced 172 chunks. Eighteen questions about the document were written by the authors, covering definitions, recommendations and questions that combine several topics. The router classified retrieval events as GENERAL (120) and ENUMERATION (7). Each model answered the 18 questions on each phone, giving 126 generation records, 127 retrieval records and 3 ingestion records. Qwen 2.5 1.5B was tested only on the 8 GB phone.
+E. Data Sources, Collection Methods and Research Instruments
+All data are primary measurements from the phones. The application's telemetry module writes one structured log record per ingestion, retrieval and generation event, containing stage timings and token counts. A Python harness reads these records over ADB (logcat), polls dumpsys meminfo for proportional set size (PSS) and native heap, and polls dumpsys battery for the battery temperature. Events are stored as raw JSON and aggregated into CSV tables. The dense, BM25 and fusion steps run in one search call that is timed as a whole, so they are reported together as hybrid search.
+F. Data Analysis Techniques
+TTFT is the time from the start of the generation call to the first generated token, which includes prompt processing. Effective prefill rate is prompt tokens divided by TTFT. Decode speed is generated tokens divided by decoding time. Means and standard deviations are reported per device and model; charts were produced with Matplotlib.
+G. Ethical Considerations
+The study involved no human participants and no personal data. The test document is publicly available, the models are used under their published licences, and all processing took place on the test devices.
+IV. RESULTS
+A. Document Ingestion
+Table III shows the ingestion of the 35-page document. The 8 GB phone was 2.4 times faster than the 4 GB phone. Embedding was the largest cost on every device (55ΓÇô62% of the total), followed by PDF text extraction; chunking and database insertion together took less than 0.6 s.
+Table III: Ingestion of the 35-page OWASP MASVS PDF (172 chunks)
+Tier
+Extraction (s)
+Chunking (s)
+Embedding (s)
+DB insert (s)
+Total (s)
+Pages/s (chunks/s)
+4 GB
+5.76
+0.30
+7.79
+0.21
+14.11
+2.48 (22.1)
+6 GB
+2.81
+0.44
+5.36
+0.08
+8.71
+4.02 (32.1)
+8 GB
+2.08
+0.37
+3.39
+0.03
+5.88
+5.95 (50.8)
+B. Retrieval Latency
+Table IV breaks down retrieval time. Mean retrieval took 186 ms on the 4 GB phone and 79 ms on the 8 GB phone; medians were 118, 117 and 70 ms. Query embedding and context assembly (which counts tokens with the language model's tokenizer) were the largest parts, while the hybrid search itself took 15ΓÇô53 ms. Intent routing took under 3 ms.
+Table IV: Mean retrieval latency per stage (ms)
+Tier
+Routing
+Query embedding
+Hybrid search (dense + BM25 + RRF)
+Context assembly
+Total (median)
+Retrieval events
+4 GB
+2.7
+47.7
+52.6
+81.1
+186.1 (118)
+37
+6 GB
+1.2
+32.2
+37.9
+62.7
+136.1 (117)
+36
+8 GB
+0.6
+18.4
+14.7
+43.5
+78.7 (70)
+54
+C. Generation Speed and Time-to-First-Token
+Table V and Figs. 2 and 3 summarise generation. For the same model, decoding on the 8 GB phone was 2.3ΓÇô2.9 times faster than on the lower tiers. TTFT was much longer than retrieval: 25ΓÇô30 s for the 0.5B model and 50ΓÇô54 s for the 1B model on the lower tiers, and 14.7ΓÇô19.2 s on the 8 GB phone. The 8 GB phone processed prompts 3ΓÇô6 times faster (72ΓÇô105 tokens/s against 15ΓÇô33 tokens/s), so it reached a lower TTFT even though its adaptive evidence budget allowed longer prompts (1,284ΓÇô1,534 tokens on average).
+Table V: Generation results (mean ┬▒ standard deviation, 18 runs per row)
+Tier
+Model
+Prompt tokens
+TTFT (s)
+Prefill (tok/s)
+Decode (tok/s)
+Peak PSS (MB)
+4 GB
+Qwen 2.5 0.5B
+875
+29.6 ┬▒ 8.2
+31.1
+8.57 ┬▒ 1.50
+767 (max 785)
+4 GB
+Llama 3.2 1B
+739
+54.1 ┬▒ 12.7
+15.0
+3.67 ┬▒ 0.77
+1,199 (max 1,226)
+6 GB
+Qwen 2.5 0.5B
+809
+25.2 ┬▒ 5.2
+33.1
+8.18 ┬▒ 1.90
+788 (max 795)
+6 GB
+Llama 3.2 1B
+705
+50.2 ┬▒ 14.6
+15.1
+3.79 ┬▒ 0.74
+1,259 (max 1,274)
+8 GB
+Qwen 2.5 0.5B
+1,534
+14.7 ┬▒ 2.7
+105.3
+19.42 ┬▒ 0.70
+771 (max 777)
+8 GB
+Llama 3.2 1B
+1,284
+15.7 ┬▒ 5.4
+86.5
+10.66 ┬▒ 0.88
+1,990 (max 1,994)
+8 GB
+Qwen 2.5 1.5B
+1,317
+19.2 ┬▒ 6.4
+71.8
+9.07 ┬▒ 1.43
+1,886 (max 2,173)
+Fig. 2. Decoding throughput (tokens/s) per device and model (┬▒1 SD).
+Fig. 3. Time-to-first-token per device and model (┬▒1 SD).
+D. Memory Usage
+Fig. 4 shows memory use. Qwen 2.5 0.5B stayed below 800 MB on all phones, Llama 3.2 1B used 1.20ΓÇô1.26 GB on the lower tiers and 1.99 GB on the 8 GB phone, and Qwen 2.5 1.5B peaked at 2.17 GB. All 126 generation runs completed and were logged.
+E. Thermal Behaviour
+Fig. 5 shows battery temperature over 36 consecutive generation runs on each phone. Temperature rose from 35ΓÇô37 ┬░C to 40ΓÇô41.4 ┬░C and levelled off in the second half of the runs. The highest reading was 41.4 ┬░C on the 4 GB phone.
+Fig. 4. Peak PSS (A) and native heap (B) per device and model.
+Fig. 5. Battery temperature over 36 consecutive runs per phone.
+V. DISCUSSION
+RQ1 (ingestion). A 35-page document was ready for questions in 6ΓÇô14 s on all three phones, which is acceptable for a one-time step. Since embedding takes more than half of this time, a faster embedding model or batching would bring the largest gain; chunking and storage are already cheap.
+RQ2 (retrieval). Hybrid retrieval with RRF added 79ΓÇô186 ms on average, which is less than 1% of the TTFT on every device. At the scale of a few hundred chunks, a full scan of all vectors with BM25 is fast enough on a phone. Index structures such as those in EdgeRAG [3] and MobileRAG [4] become important for much larger collections, which this study did not test.
+RQ3 (generation and memory). The 0.5B model ran at an interactive 8ΓÇô19 tokens/s and under 800 MB on every tier, so it is the practical choice for 4 GB and 6 GB phones. The 1B and 1.5B models fit within memory on the tested phones but decoded at under 4 tokens/s on the lower tiers. The higher PSS of Llama 3.2 1B on the 8 GB phone is most likely because the model file is memory-mapped and Android keeps more of its pages resident when more RAM is free; this was not examined further.
+RQ4 (bottleneck). The response time is dominated by prompt processing, not by retrieval or decoding. On the 4 GB and 6 GB phones the effective prefill rate was 15ΓÇô33 tokens/s, so a prompt of about 800 tokens takes 25ΓÇô55 s before the first word appears. This is why OfflineDocAI sizes the evidence from the measured prefill speed (Eq. 4) rather than from a fixed number of chunks. It also supports the observation of Liu et al. [15] that short, relevant context is preferable for small models. Pocket RAG [20] reports a 3.7 s TTFT for a narrower first-aid task; the difference is consistent with our finding that prompt lengt

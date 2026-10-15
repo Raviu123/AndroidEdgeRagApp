@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 1256.3,
+    "native_heap_mb": 73.86,
+    "java_heap_mb": 22.6,
+    "battery_temp_c": 38.9
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791712383357,
+    "query": "What is the purpose of cryptography in mobile applications?",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 22,
+    "top_k_candidates": 22,
+    "filtered_chunks": 4,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 2,
+    "query_embedding_ms": 38,
+    "dense_search_ms": 7,
+    "bm25_search_ms": 3,
+    "rrf_fusion_ms": 3,
+    "context_assembly_ms": 34,
+    "total_retrieval_ms": 90,
+    "assembled_tokens": 418,
+    "budget_tokens": 600
+  }
+}

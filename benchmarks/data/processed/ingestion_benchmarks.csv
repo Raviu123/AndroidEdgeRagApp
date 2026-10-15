@@ -1,0 +1,4 @@
+timestamp,ram_tier,device_model,soc,doc_name,file_size_kb,page_count,chunk_count,embedding_model,extraction_ms,chunking_ms,embedding_ms,db_insert_ms,total_ingest_ms,pages_per_sec,chunks_per_sec,peak_pss_mb,native_heap_mb
+2026-10-11T11:52:40.115872,tier_4gb,M2003J15SC,mt6768,OWASP_MASVS.pdf,992.62,35,172,all-MiniLM-L6-v2-v1,5764,303,7789,210,14111,2.48,22.08,587.93,402.91
+2026-10-11T13:25:22.002067,tier_8gb,moto g67 power 5G,parrot,OWASP_MASVS.pdf,992.62,35,172,all-MiniLM-L6-v2-v1,2075,370,3388,31,5881,5.95,50.77,568.34,126.09
+2026-10-11T13:49:27.241506,tier_6gb,RMX3943,mt6835,OWASP_MASVS.pdf,992.62,35,172,all-MiniLM-L6-v2-v1,2809,441,5362,75,8711,4.02,32.08,784.27,131.2

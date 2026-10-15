@@ -19,12 +19,33 @@ import java.util.Locale
 object TextChunker {
 
     /** Bump when chunking behaviour changes; part of the document index signature. */
-    const val VERSION = 3
+    const val VERSION = 4
 
     const val DEFAULT_TARGET_TOKENS = 128
     const val DEFAULT_MAX_TOKENS = 180
     const val DEFAULT_OVERLAP_TOKENS = 32
     private const val HEADING_RESERVE_TOKENS = 24
+
+    val DOT_LEADER = Regex("""(?:\.\s*){3,}\s*\d+|(?:\.\s*){5,}""")
+    val TRAILING_PAGE_NUM = Regex("""\s+\d{1,4}$""")
+    val TOC_HEADING = Regex("""^(?:table\s+of\s+contents|contents|index|table\s+of\s+figures|list\s+of\s+tables|list\s+of\s+figures)$""", RegexOption.IGNORE_CASE)
+
+    /**
+     * Detects structural navigation blocks (Table of Contents, Index, List of Figures) that contain
+     * high-density keyword lists with dot leaders or page numbers, which pollute retrieval if indexed.
+     */
+    fun isTableOfContents(text: String, sectionTitle: String? = null): Boolean {
+        val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.isEmpty()) return false
+        val dotCount = lines.count { DOT_LEADER.containsMatchIn(it) }
+        if (dotCount >= 2) return true
+        if (dotCount >= 1 && lines.size <= 3) return true
+        val isTocTitle = sectionTitle != null && TOC_HEADING.matches(sectionTitle.trim())
+        val trailingPages = lines.count { TRAILING_PAGE_NUM.containsMatchIn(it) }
+        if (isTocTitle && (trailingPages.toDouble() / lines.size >= 0.3 || dotCount > 0)) return true
+        if (lines.size >= 4 && (trailingPages.toDouble() / lines.size >= 0.5)) return true
+        return false
+    }
 
     data class Chunk(
         val index: Int,
@@ -82,7 +103,8 @@ object TextChunker {
     ): List<Chunk> {
         require(maxTokens > 0 && targetTokens in 1..maxTokens) { "Invalid chunk token limits" }
         if (pages.isEmpty()) return emptyList()
-        val blocks = mergeCrossPageParagraphs(parseBlocks(pages))
+        val rawBlocks = mergeCrossPageParagraphs(parseBlocks(pages))
+        val blocks = rawBlocks.filterNot { isTableOfContents(it.text, it.sectionTitle) }
         // Leave room for a section heading to share the chunk with the unit that follows it.
         val unitLimit = (maxTokens - HEADING_RESERVE_TOKENS).coerceAtLeast(maxTokens / 2)
         val units = toUnits(blocks, tokenCounter, unitLimit)

@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 764.79,
+    "native_heap_mb": 304.39,
+    "java_heap_mb": 20.89,
+    "battery_temp_c": 39.0
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791700458050,
+    "query": "How do authentication and session management help protect a mobile application?",
+    "intent": "GENERAL",
+    "document_ids": "3",
+    "total_corpus_chunks": 21,
+    "top_k_candidates": 21,
+    "filtered_chunks": 4,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 24,
+    "dense_search_ms": 7,
+    "bm25_search_ms": 3,
+    "rrf_fusion_ms": 3,
+    "context_assembly_ms": 77,
+    "total_retrieval_ms": 118,
+    "assembled_tokens": 621,
+    "budget_tokens": 867
+  }
+}

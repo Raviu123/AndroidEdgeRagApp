@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "bb16ca1e0408",
+    "brand": "Redmi",
+    "model": "M2003J15SC",
+    "android_version": "Android 11 (API 30)",
+    "soc_chipset": "mt6768",
+    "total_ram_mb": 3750.1,
+    "total_ram_gb": 3.66,
+    "ram_tier": "tier_4gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 1195.38,
+    "native_heap_mb": 119.32,
+    "java_heap_mb": 16.35,
+    "battery_temp_c": 39.2
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791708828129,
+    "query": "What does MASVS recommend for protecting sensitive data? explain in a short paragraph",
+    "intent": "GENERAL",
+    "document_ids": "3",
+    "total_corpus_chunks": 22,
+    "top_k_candidates": 22,
+    "filtered_chunks": 6,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 27,
+    "dense_search_ms": 11,
+    "bm25_search_ms": 5,
+    "rrf_fusion_ms": 5,
+    "context_assembly_ms": 40,
+    "total_retrieval_ms": 90,
+    "assembled_tokens": 468,
+    "budget_tokens": 600
+  }
+}

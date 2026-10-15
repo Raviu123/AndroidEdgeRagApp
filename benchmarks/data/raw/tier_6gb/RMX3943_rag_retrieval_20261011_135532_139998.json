@@ -1,0 +1,38 @@
+{
+  "device_profile": {
+    "serial": "GYMZDARCMB65EIZX",
+    "brand": "realme",
+    "model": "RMX3943",
+    "android_version": "Android 16 (API 36)",
+    "soc_chipset": "mt6835",
+    "total_ram_mb": 5628.5,
+    "total_ram_gb": 5.5,
+    "ram_tier": "tier_6gb"
+  },
+  "hardware_snapshot": {
+    "pss_total_mb": 793.91,
+    "native_heap_mb": 54.82,
+    "java_heap_mb": 23.08,
+    "battery_temp_c": 38.6
+  },
+  "telemetry_data": {
+    "event_type": "RAG_RETRIEVAL",
+    "timestamp_epoch_ms": 1791707131254,
+    "query": "How does MASVS address privacy in mobile applications?",
+    "intent": "GENERAL",
+    "document_ids": "1",
+    "total_corpus_chunks": 24,
+    "top_k_candidates": 24,
+    "filtered_chunks": 5,
+    "embedding_model_id": "all-MiniLM-L6-v2-v1",
+    "intent_routing_ms": 1,
+    "query_embedding_ms": 17,
+    "dense_search_ms": 14,
+    "bm25_search_ms": 7,
+    "rrf_fusion_ms": 7,
+    "context_assembly_ms": 39,
+    "total_retrieval_ms": 87,
+    "assembled_tokens": 472,
+    "budget_tokens": 600
+  }
+}

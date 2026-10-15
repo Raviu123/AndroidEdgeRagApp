@@ -22,16 +22,25 @@ object PromptBuilder {
         AnswerLength.LONG -> "Give a detailed, comprehensive answer that covers every relevant point and explains each one fully. Organise it with bullet points, numbered steps or short headings where they help."
     }
 
-    fun groundedSystemPrompt(length: AnswerLength, isBudgetLimited: Boolean): String = buildString {
-        append("You answer questions using only the numbered sources provided by the user.\n")
-        append("Rules:\n")
-        append("- Use only information stated in the sources. Do not use outside knowledge and do not guess.\n")
-        append("- After each statement, cite the source it came from by copying its tag exactly, for example [Source 2, Page 7].\n")
-        append("- If the sources do not contain the answer, reply exactly: \"$NOT_FOUND_ANSWER\"\n")
-        append("- If the sources answer only part of the question, answer that part and say what is not covered.\n")
-        append("- Copy numbers, names, dates, units and quotations exactly as they appear in the sources.\n")
-        if (isBudgetLimited) append("- Not every relevant passage could be shown, so do not claim that a list or answer is complete.\n")
-        append("- ").append(lengthInstruction(length))
+    fun groundedSystemPrompt(length: AnswerLength, isBudgetLimited: Boolean, isSubOneBillion: Boolean = false): String = buildString {
+        if (isSubOneBillion) {
+            append("You answer questions using only the sources provided by the user.\n")
+            append("Instructions:\n")
+            append("- Use facts from the sources. Do not guess.\n")
+            append("- If the sources do not contain the answer, reply: \"$NOT_FOUND_ANSWER\"\n")
+            append("- ").append(lengthInstruction(length)).append("\n")
+            append("- Explain the answer clearly using complete thoughts. Do not reply with single-line or tautological summaries.")
+        } else {
+            append("You answer questions using only the numbered sources provided by the user.\n")
+            append("Rules:\n")
+            append("- Use only information stated in the sources. Do not use outside knowledge and do not guess.\n")
+            append("- After each statement, cite the source it came from by copying its tag exactly, for example [Source 2, Page 7].\n")
+            append("- If the sources do not contain the answer, reply exactly: \"$NOT_FOUND_ANSWER\"\n")
+            append("- If the sources answer only part of the question, answer that part and say what is not covered.\n")
+            append("- Copy numbers, names, dates, units and quotations exactly as they appear in the sources.\n")
+            if (isBudgetLimited) append("- Not every relevant passage could be shown, so do not claim that a list or answer is complete.\n")
+            append("- ").append(lengthInstruction(length))
+        }
     }
 
     fun groundedMessages(
@@ -39,7 +48,8 @@ object PromptBuilder {
         question: String,
         length: AnswerLength,
         isBudgetLimited: Boolean = false,
-        previousQuestion: String? = null
+        previousQuestion: String? = null,
+        isSubOneBillion: Boolean = false
     ): List<ChatMessage> {
         val sources = blocks.joinToString("\n\n") { sanitizeUntrusted(it.format()) }
         val user = buildString {
@@ -54,7 +64,7 @@ object PromptBuilder {
             append(sanitizeUntrusted(question.trim()))
         }
         return listOf(
-            ChatMessage("system", groundedSystemPrompt(length, isBudgetLimited)),
+            ChatMessage("system", groundedSystemPrompt(length, isBudgetLimited, isSubOneBillion)),
             ChatMessage("user", user)
         )
     }
