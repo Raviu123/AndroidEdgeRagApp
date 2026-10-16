@@ -25,7 +25,9 @@ data class RetrievalResult(
     val source: RetrievalSource,
     val intent: QueryIntent,
     val denseScore: Float = 0f,
-    val bm25Score: Float = 0f
+    val bm25Score: Float = 0f,
+    /** Cross-encoder logit (larger = answers the question better); null when the result was not reranked. */
+    val rerankScore: Float? = null
 )
 
 /** One search string and its embedding (the user question, or a sub-query such as one side of a comparison). */
@@ -39,11 +41,13 @@ data class SearchQuery(val text: String, val embedding: FloatArray)
  *    from the index are typo-corrected to the closest indexed term first.
  *  - Fusion: Reciprocal Rank Fusion (k = 60) across every ranked list (one dense + one BM25 list per query).
  *  - A candidate must show *some* evidence (dense >= [MIN_DENSE] or a BM25 hit) to survive.
+ *  - Rerank: with a [PassageReranker], the top [RERANK_POOL] fused candidates are re-scored against
+ *    the question by a cross-encoder and re-ordered; fusion only decides which candidates it sees.
  *  - Neighbouring chunks of the best hits are appended (lower priority) to restore surrounding context.
  *
  * It contains no domain vocabulary, boilerplate lists or per-document rules.
  */
-class VectorStore(private val chunkDao: ChunkDao) {
+class VectorStore(private val chunkDao: ChunkDao, var reranker: PassageReranker? = null) {
 
     private val TAG = "VectorStore"
 
@@ -59,6 +63,8 @@ class VectorStore(private val chunkDao: ChunkDao) {
         private const val BM25_B = 0.75
         private const val NEIGHBOR_SEEDS = 3
         private const val SUMMARY_SAMPLES = 24
+        /** Fused candidates the cross-encoder re-scores (cost grows linearly: ~one passage per 10–40 ms on phone CPUs). */
+        const val RERANK_POOL = 24
     }
 
     /** Pre-analysed chunk: decoded embedding + term frequencies, cached per document. */
@@ -95,8 +101,34 @@ class VectorStore(private val chunkDao: ChunkDao) {
         return when (classification.intent) {
             QueryIntent.PAGE_LOOKUP, QueryIntent.PAGE_RANGE -> pageResults(chunks, classification)
             QueryIntent.SUMMARY -> summarySample(chunks, classification)
-            else -> hybrid(chunks, index.docFreq, listOf(query) + subQueries, classification, topK, expandNeighbors = true)
+            else -> {
+                val reranker = reranker
+                val pool = if (reranker != null) maxOf(topK, RERANK_POOL) else topK
+                val fused = hybrid(chunks, index.docFreq, listOf(query) + subQueries, classification, pool, expandNeighbors = false)
+                val primary = if (reranker != null) rerank(reranker, query.text, fused, topK) else fused
+                primary + neighbors(primary, chunks, classification)
+            }
         }
+    }
+
+    /**
+     * Re-orders [fused] by cross-encoder score. The relevance score becomes the sigmoid of the logit so
+     * block order and neighbour priority follow the reranker. Without scores the fused order is kept.
+     */
+    private suspend fun rerank(reranker: PassageReranker, question: String, fused: List<RetrievalResult>, topK: Int): List<RetrievalResult> {
+        if (fused.isEmpty()) return fused
+        val scores = reranker.score(question, fused.map { listOfNotNull(it.chunk.sectionTitle, it.chunk.text).joinToString("\n") })
+            ?: return fused.take(topK)
+        val reranked = fused.mapIndexed { i, r ->
+            r.copy(rerankScore = scores[i], relevanceScore = (1.0 / (1.0 + kotlin.math.exp(-scores[i].toDouble()))).toFloat())
+        }.sortedByDescending { it.rerankScore }.take(topK)
+        runCatching {
+            Log.d(TAG, "Reranked for \"$question\":")
+            reranked.take(5).forEachIndexed { rank, r ->
+                Log.d(TAG, "  #${rank + 1} chunk=${r.chunk.id} page=${r.chunk.pageSpan} rerank=%.2f dense=%.3f bm25=%.2f".format(r.rerankScore, r.denseScore, r.bm25Score))
+            }
+        }
+        return reranked
     }
 
     // ---------------------------------------------------------------------------------------------

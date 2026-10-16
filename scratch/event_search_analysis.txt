@@ -1,0 +1,170 @@
+
+=======================================================
+TURN 1: Did Adam Smith send a message to Li Hua about the upcoming building maintenance schedule before the administrators announced a temporary change in the construction schedule due to weather conditions?
+Event A: Adam Smith send a message to Li Hua about upcoming building maintenance schedule
+Event B: administrators announced temporary change in construction schedule due to weather conditions
+
+Top chunks for Event A:
+  [Chunk 1036, Page 1, WEEK 1] (matches 2/2): Excited for our adventure this weekend! 🎉
+
+[WEEK 1] 2026-01-07 15:00 (Wednesday) | Source: LiHua-World/week1/20260107_1500.txt
+
+LiHua: Hey Adam! Hope...
+  [Chunk 1037, Page 2, WEEK 1] (matches 2/2): Sure, I can arrange for that repair. Would you prefer a specific time for the maintenance to be done?
+
+LiHua: Thanks, Adam! I’m flexible, so just let...
+  [Chunk 1049, Page 2, WEEK 1] (matches 2/2): Can’t wait to check out the place and capture some great shots. See you then!
+
+LiHua: Awesome! See you at 3! 🎉 Can't wait to snap some amazing pics to...
+
+Top chunks for Event B:
+  [Chunk 1726, Page 48, WEEK 20] (matches 2/2): RexxarRemar: The Bluebell, Camellia, and Tulip combo sounds awesome for a vibrant vibe!
+
+They’ll complement each other well and attract those butterfl...
+  [Chunk 1727, Page 48, WEEK 20] (matches 2/2): Fingers crossed for beautiful weather! 🌞
+
+AdamSmith: It's always best to prepare for any weather surprises. We can have a backup plan if needed!
+
+Adam...
+  [Chunk 1821, Page 54, WEEK 21] (matches 2/2): Plus, they can withstand the weather pretty well. Anyone else has thoughts on bench materials or styles?
+
+TirionFordring: Those are fantastic ideas! W...
+
+=======================================================
+TURN 4: Did Li Hua send a message to Jennifer thanking her for the new training schedule before he requested a change in his training schedule for Thursday?
+Event A: Li Hua send a message to Jennifer thanking her for the new training schedule
+Event B: requested a change in his training schedule for Thursday
+
+Top chunks for Event A:
+  [Chunk 1062, Page 3, WEEK 2] (matches 2/3): JenniferMoore: Hey Li Hua! 👋 Just wanted to say hi and introduce myself as your personal trainer. I'm excited to work with you! 💪
+
+I'd love to discuss...
+  [Chunk 1063, Page 3, WEEK 2] (matches 2/3): How about we chat tomorrow around the same time? Let me know what works for you!
+
+JenniferMoore: Sounds great! Tomorrow at 3 PM works for me! We can g...
+  [Chunk 1068, Page 4, WEEK 2] (matches 2/3): Just let me know if you need anything before the big day. 🥳
+
+[WEEK 2] 2026-01-14 12:00 (Wednesday) | Source: LiHua-World/week2/20260114_1200.txt
+
+Jenn...
+
+Top chunks for Event B:
+  [Chunk 1136, Page 9, WEEK 5] (matches 3/3): You’re doing amazing! 🙌🏼💥
+
+[WEEK 5] 2026-02-05 13:00 (Thursday) | Source: LiHua-World/week5/20260205_1300.txt
+
+LiHua: Hey Jennifer! Just checking in t...
+  [Chunk 1072, Page 4, WEEK 2] (matches 2/3): Ready to give it my all! 🏋️‍♂️💥 See you bright and early!
+
+JenniferMoore: That's the spirit! Early bird gets the gains! 😄🌅 Let's make it a great sessi...
+  [Chunk 1075, Page 4, WEEK 2] (matches 2/3): Thanks a bunch! If you have any other suggestions, I’m all ears!
+
+JenniferMoore: No problem! If you want more options, consider checking out Target or...
+
+=======================================================
+TURN 5: Did Li Hua ask Jennifer for advice on how to prevent muscle soreness after an intense workout session before he told her that he feels soreness in his arm muscles after the workout this week?
+Event A: ask Jennifer for advice on how to prevent muscle soreness after an intense workout
+Event B: told her that he feels soreness in his arm muscles after the workout this week
+
+Top chunks for Event A:
+  [Chunk 2379, Page 92, WEEK 32] (matches 3/3): LiHua: Hey Jennifer! Got a quick question for you. What can I do to prevent muscle soreness after a tough workout? Any tips?
+
+JenniferMoore: Hey Li Hu...
+  [Chunk 3158, Page 141, WEEK 44] (matches 3/3): WEEK 44
+
+[WEEK 44] 2026-11-01 11:00 (Sunday) | Source: LiHua-World/week44/20261101_1100.txt
+
+JenniferMoore: Hey everyone! I just wanna offer some tips...
+  [Chunk 1140, Page 9, WEEK 5] (matches 2/3): LiHua: Hey Jennifer! I've been feeling pretty sore after our workout sessions. Do you have any tips or tricks for dealing with the muscle soreness? Th...
+
+Top chunks for Event B:
+  [Chunk 2379, Page 92, WEEK 32] (matches 3/3): LiHua: Hey Jennifer! Got a quick question for you. What can I do to prevent muscle soreness after a tough workout? Any tips?
+
+JenniferMoore: Hey Li Hu...
+  [Chunk 2888, Page 124, WEEK 40] (matches 3/3): JenniferMoore: Hey Li Hua! Just checking in, how are those arm muscles feeling after our bench press session? Hope you're pushing through the soreness...
+  [Chunk 3548, Page 166, WEEK 49] (matches 3/3): It's inspiring to watch! Got any specific start-ups in mind that you admire?
+
+[WEEK 49] 2026-12-11 11:00 (Friday) | Source: LiHua-World/week49/2026121...
+
+=======================================================
+TURN 8: Did Li Hua discuss his progress with the fitness plan before he shared a blog post about his recent fitness achievements?
+Event A: discuss progress with the fitness plan
+Event B: shared a blog post about his recent fitness achievements
+
+Top chunks for Event A:
+  [Chunk 1090, Page 5, WEEK 2] (matches 2/2): JenniferMoore: Hey Li Hua! 🎉 Happy Lunar New Year! May this year bring you lots of joy and success. Keep up the fantastic work with your fitness goals...
+  [Chunk 1134, Page 8, WEEK 5] (matches 2/2): I feel like it’s going to be a great boost for my fitness journey! 💪🏼
+
+JenniferMoore: You’re welcome! I’m pumped to see you take on this new challenge...
+  [Chunk 1686, Page 45, WEEK 19] (matches 2/2): Plus, tracking progress together can be super encouraging. I’m ready to dive into this!
+
+JenniferMoore: That's the spirit, everyone! Let’s support eac...
+
+Top chunks for Event B:
+  [Chunk 1224, Page 15, WEEK 9] (matches 1/1): YurikoYamamoto: Hey Li Hua! I’ve been thinking about adding a blog section to my studio’s homepage. I believe it could be a great way to share insight...
+  [Chunk 1226, Page 15, WEEK 9] (matches 1/1): What do you think? 📸 💡
+
+YurikoYamamoto: I really like the idea of including interviews! It would be wonderful to showcase clients' journeys. Adding vi...
+  [Chunk 1228, Page 15, WEEK 9] (matches 1/1): What’s our next step? 🥰
+
+LiHua: Maybe we can outline a couple of blog post ideas together, and then put together a basic content calendar? It’ll help...
+
+=======================================================
+TURN 9: Did Li Hua send a message to Jennifer asking if he can turn the Thursday class to Friday after he requested a change in his training schedule for Thursday?
+Event A: asking if he can turn the Thursday class to Friday
+Event B: requested a change in his training schedule for Thursday
+
+Top chunks for Event A:
+  [Chunk 1239, Page 16, WEEK 10] (matches 3/3): LiHua: Hey Jennifer! Hope you’re doing well! Quick question, is it possible to switch my class from Thursday to Friday this week? Let me know! Thanks!...
+  [Chunk 1072, Page 4, WEEK 2] (matches 2/3): Ready to give it my all! 🏋️‍♂️💥 See you bright and early!
+
+JenniferMoore: That's the spirit! Early bird gets the gains! 😄🌅 Let's make it a great sessi...
+  [Chunk 1075, Page 4, WEEK 2] (matches 2/3): Thanks a bunch! If you have any other suggestions, I’m all ears!
+
+JenniferMoore: No problem! If you want more options, consider checking out Target or...
+
+Top chunks for Event B:
+  [Chunk 1136, Page 9, WEEK 5] (matches 3/3): You’re doing amazing! 🙌🏼💥
+
+[WEEK 5] 2026-02-05 13:00 (Thursday) | Source: LiHua-World/week5/20260205_1300.txt
+
+LiHua: Hey Jennifer! Just checking in t...
+  [Chunk 1130, Page 8, WEEK 5] (matches 2/3): WEEK 5
+
+[WEEK 5] 2026-02-04 15:00 (Wednesday) | Source: LiHua-World/week5/20260204_1500.txt
+
+LiHua: Hey Jennifer! Thanks for understanding my situatio...
+  [Chunk 1133, Page 8, WEEK 5] (matches 2/3): If you have any questions or need anything, just give me a shout. 💪😊
+
+[WEEK 5] 2026-02-04 16:00 (Wednesday) | Source: LiHua-World/week5/20260204_1600....
+
+=======================================================
+TURN 10: Did Li Hua ask Yuriko to play music together before Wolfgang proposed to pause playing musical instruments?
+Event A: ask Yuriko to play music together
+Event B: Wolfgang proposed to pause playing musical instruments
+
+Top chunks for Event A:
+  [Chunk 1270, Page 18, WEEK 11] (matches 3/3): You too, Li Hua! 🎉👩‍🍳
+
+[WEEK 11] 2026-03-18 15:10 (Wednesday) | Source: LiHua-World/week11/20260318_1510.txt
+
+LiHua: Hey Yuriko! 😊 I was wondering if...
+  [Chunk 1278, Page 18, WEEK 11] (matches 3/3): Excited to hang out and see where this goes. 🎶😄
+
+LiHua: Nice to see you getting to know each other! By the way, we should all plan a jam session toget...
+  [Chunk 1336, Page 22, WEEK 12] (matches 3/3): Let's make it special! 🎶❤
+
+WolfgangSchulz: I'm really excited about playing those songs! It's going to be a great night! 🎉🌙 YurikoYamamoto: I can't ag...
+
+Top chunks for Event B:
+  [Chunk 1701, Page 46, WEEK 19] (matches 2/2): We’ll miss you. Maybe we can do a quick jam another time?
+
+WolfgangSchulz: How about we just pause for this week then? No point in rehearsing without...
+  [Chunk 1024, Page 1, WEEK 1] (matches 1/2): WEEK 1
+
+[WEEK 1] 2026-01-05 11:00 (Monday) | Source: LiHua-World/week1/20260105_1100.txt
+
+LiHua: Hey! Just wanted to let you know that I’ve arrived in...
+  [Chunk 1025, Page 1, WEEK 1] (matches 1/2): See you on the 8th! 🎶✨
+
+LiHua: Perfect! I'm looking forward to it! Let’s make it a fun day! 😄 WolfgangSchulz: Definitely! It's been too long. We're go...

@@ -70,6 +70,32 @@ class ChatRepository(
         private const val SHORT_QUESTION_FLOOR_FACTOR = 0.8f
 
         /**
+         * Cross-encoder (ms-marco-MiniLM-L-6-v2) logits. Below [RERANK_RELEVANCE_FLOOR] for every passage,
+         * the document does not discuss the question. Passages below [RERANK_KEEP_FLOOR], or more than
+         * [RERANK_KEEP_MARGIN] below the best one, are not shown to the model: small models copy whatever
+         * they are given, so a marginal passage costs more than it adds.
+         */
+        const val RERANK_RELEVANCE_FLOOR = -4f
+        const val RERANK_KEEP_FLOOR = -6f
+        const val RERANK_KEEP_MARGIN = 6f
+
+        /** Results the model should see: with reranker scores, only the passages that plausibly answer the question. */
+        fun focusOnRelevant(results: List<RetrievalResult>, isComparison: Boolean = false): List<RetrievalResult> {
+            val best = results.mapNotNull { it.rerankScore }.maxOrNull() ?: return results
+            val margin = if (isComparison) 10f else RERANK_KEEP_MARGIN
+            val kept = results.filter { r ->
+                val score = r.rerankScore ?: return@filter true // neighbours and structural results
+                score >= RERANK_KEEP_FLOOR && score >= best - margin
+            }
+            // Neighbours are context for kept passages only.
+            val keptIds = kept.filter { it.source == RetrievalSource.HYBRID }.map { it.chunk.documentId to it.chunk.chunkIndex }.toSet()
+            return kept.filter { r ->
+                r.source != RetrievalSource.NEIGHBOR ||
+                    (r.chunk.documentId to r.chunk.chunkIndex - 1) in keptIds || (r.chunk.documentId to r.chunk.chunkIndex + 1) in keptIds
+            }
+        }
+
+        /**
          * Upper bounds on evidence tokens. The real limit is what fits in the model's context window;
          * these caps keep prompt-processing time reasonable on phone CPUs (prefill is roughly linear in
          * prompt length) and stop small models from being diluted by marginal passages: a 0.5B model
@@ -308,33 +334,21 @@ class ChatRepository(
 
         val retrievalOverallStart = android.os.SystemClock.elapsedRealtime()
 
-        // 1. Classify once; the same classification drives retrieval and context assembly.
-        val routeStart = android.os.SystemClock.elapsedRealtime()
-        val classification = QueryIntentRouter.route(question)
-        val routeMs = android.os.SystemClock.elapsedRealtime() - routeStart
-
-        // 2. Embed the user's own words plus sub-queries (comparison sides, or the follow-up resolved with the previous question).
-        val embedStart = android.os.SystemClock.elapsedRealtime()
-        val previousQuestion = request.previousTurn?.question
-        val followsUp = previousQuestion != null && isFollowUp(question)
-        val followUpQuery = if (followsUp &&
-            classification.intent != QueryIntent.PAGE_LOOKUP && classification.intent != QueryIntent.PAGE_RANGE && classification.intent != QueryIntent.SUMMARY
-        ) "$previousQuestion $question" else null
-        val query = SearchQuery(question, embedder.embedQuery(question))
-        val subQueries = (classification.subQueries + listOfNotNull(followUpQuery)).map { SearchQuery(it, embedder.embedQuery(it)) }
-        val queryEmbedMs = android.os.SystemClock.elapsedRealtime() - embedStart
-
-        // 3. Retrieve (only vectors of the active embedding model).
-        val searchStart = android.os.SystemClock.elapsedRealtime()
-        val results = vectorStore.retrieve(query, ready.map { it.id }, classification, subQueries, embeddingModelId = modelId)
-        val searchMs = android.os.SystemClock.elapsedRealtime() - searchStart
-        if (results.isEmpty()) return Reply(notFoundMessage(classification), sources = null)
+        // 1-3. Classify once, embed, retrieve (and rerank).
+        val retrieved = retrieve(question, ready.map { it.id }, request.previousTurn?.question)
+        val classification = retrieved.classification
+        val followsUp = retrieved.followUpQuery != null
+        val routeMs = retrieved.routeMs
+        val queryEmbedMs = retrieved.queryEmbedMs
+        val searchMs = retrieved.searchMs
+        if (retrieved.results.isEmpty()) return Reply(notFoundMessage(classification), sources = null)
 
         // 4. Nothing related at all: say so without spending a minute of generation on it.
-        if (!passesRelevanceGate(results, listOfNotNull(question, followUpQuery), classification)) {
+        if (!retrieved.passesGate) {
             Log.i(TAG, "Relevance gate: no passage is related to \"$question\"")
             return Reply(PromptBuilder.NOT_FOUND_ANSWER, sources = null)
         }
+        val results = focusOnRelevant(retrieved.results, classification.intent == QueryIntent.COMPARISON)
 
         // 5. Budget evidence from the real context window, capped for latency.
         _chatState.value = ChatState.Preparing
@@ -401,6 +415,44 @@ class ChatRepository(
         return Reply(answer, sources, metrics = metricsObj.toJson())
     }
 
+    /** Retrieval outcome of one question, before context assembly. */
+    internal class Retrieved(
+        val classification: QueryClassification,
+        /** The previous question joined with this one when this one is a follow-up; else null. */
+        val followUpQuery: String?,
+        val results: List<RetrievalResult>,
+        val passesGate: Boolean,
+        val routeMs: Long,
+        val queryEmbedMs: Long,
+        val searchMs: Long
+    )
+
+    /**
+     * Classifies [question] once, embeds it plus its sub-queries (comparison sides, or the follow-up
+     * resolved with [previousQuestion]) and retrieves from [documentIds] using only vectors of the
+     * active embedding model. Also used by the on-device benchmark to inspect retrieval alone.
+     */
+    internal suspend fun retrieve(question: String, documentIds: List<Long>, previousQuestion: String?): Retrieved {
+        val routeStart = android.os.SystemClock.elapsedRealtime()
+        val classification = QueryIntentRouter.route(question)
+        val routeMs = android.os.SystemClock.elapsedRealtime() - routeStart
+
+        val embedStart = android.os.SystemClock.elapsedRealtime()
+        val followsUp = previousQuestion != null && isFollowUp(question)
+        val followUpQuery = if (followsUp &&
+            classification.intent != QueryIntent.PAGE_LOOKUP && classification.intent != QueryIntent.PAGE_RANGE && classification.intent != QueryIntent.SUMMARY
+        ) "$previousQuestion $question" else null
+        val query = SearchQuery(question, embedder.embedQuery(question))
+        val subQueries = (classification.subQueries + listOfNotNull(followUpQuery)).map { SearchQuery(it, embedder.embedQuery(it)) }
+        val queryEmbedMs = android.os.SystemClock.elapsedRealtime() - embedStart
+
+        val searchStart = android.os.SystemClock.elapsedRealtime()
+        val results = vectorStore.retrieve(query, documentIds, classification, subQueries, embeddingModelId = embedder.modelId)
+        val searchMs = android.os.SystemClock.elapsedRealtime() - searchStart
+        val passes = results.isNotEmpty() && passesRelevanceGate(results, listOfNotNull(question, followUpQuery), classification)
+        return Retrieved(classification, followUpQuery, results, passes, routeMs, queryEmbedMs, searchMs)
+    }
+
     /**
      * True when at least one passage is plausibly related: its embedding similarity is above the
      * model's floor, or it contains at least half of the question's content words. Structural
@@ -408,6 +460,8 @@ class ChatRepository(
      */
     private fun passesRelevanceGate(results: List<RetrievalResult>, queries: List<String>, classification: QueryClassification): Boolean {
         if (classification.intent == QueryIntent.PAGE_LOOKUP || classification.intent == QueryIntent.PAGE_RANGE || classification.intent == QueryIntent.SUMMARY) return true
+        // The cross-encoder judges question and passage together, which is far more reliable than word overlap.
+        results.mapNotNull { it.rerankScore }.maxOrNull()?.let { return it >= RERANK_RELEVANCE_FLOOR }
         val termSets = queries.map { TextAnalyzer.terms(it).toSet() }.filter { it.isNotEmpty() }
         if (termSets.isEmpty()) return true
         // Short questions ("explain the conclusion") embed less precisely, so their similarity floor is lower.

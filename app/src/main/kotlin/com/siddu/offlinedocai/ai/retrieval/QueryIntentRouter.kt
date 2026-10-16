@@ -81,6 +81,17 @@ object QueryIntentRouter {
         """(?i)^\s*(?:please\s+)?(?:list|enumerate|name)\b|\b(?:list|name|enumerate)\s+(?:all|every|each)\b|\bwhat\s+are\s+(?:all\s+)?(?:the\s+)?(?:different\s+|various\s+|main\s+|key\s+)?[\p{L}\- ]{2,40}?s\b(?!\s+(?:of|in)\s+(?:the|this)\s+\w+\s+(?:about|for))|\b(?:all|every)\s+(?:the\s+)?[\p{L}\-]+s?\s+(?:mentioned|listed|described|discussed)\b|\b(?:types|kinds|steps|stages|phases|categories|examples)\s+of\b|\bwhat\s+steps\b|\bhow\s+many\b"""
     )
 
+    private val TEMPORAL_CONNECTORS = Regex(
+        """(?i)\b(before|after|prior\s+to|subsequent\s+to|following|earlier\s+than|later\s+than)\b"""
+    )
+    private val LEAD_IN = Regex(
+        """(?i)^\s*(?:did|was|were|is|are|does|do|has|have|had|can|could|would|should|will)\s+"""
+    )
+    private val PRONOUN_SUBJECT = Regex("""(?i)^(?:he|she|they|it|we|i)\b""")
+    private val NAMED_CLAUSE_SUBJECT = Regex(
+        """(?i)^(?:the\s+[a-z]+|[A-Z][a-zA-Z0-9_-]+)\s+(?:first\s+|also\s+)?(?:[a-z]+ed|announced|asked|told|requested|discussed|shared|proposed|booked|consulted|sent|agreed|did|was|is)\b"""
+    )
+
     fun route(query: String): QueryClassification {
         val q = query.trim()
 
@@ -110,6 +121,10 @@ object QueryIntentRouter {
             }
         }
 
+        extractSequentialClauses(q)?.let { (sideA, sideB) ->
+            return QueryClassification(QueryIntent.COMPARISON, q, entityA = sideA, entityB = sideB)
+        }
+
         if (ENUMERATION.containsMatchIn(q)) {
             return QueryClassification(QueryIntent.ENUMERATION, q)
         }
@@ -125,6 +140,41 @@ object QueryIntentRouter {
         if (!SUMMARY_WORD.containsMatchIn(q)) return false
         val remainder = TextAnalyzer.tokens(SUMMARY_WORD.replace(q, " "))
         return remainder.none { it.length > 1 && !it.all(Char::isDigit) && it !in TextAnalyzer.STOPWORDS && it !in SUMMARY_FILLER }
+    }
+
+    private fun extractSequentialClauses(q: String): Pair<String, String>? {
+        val clean = LEAD_IN.replace(q.trim(), "").trimEnd('?', '.', '!', ' ')
+        val allMatches = TEMPORAL_CONNECTORS.findAll(clean).toList()
+        if (allMatches.isEmpty()) return null
+
+        data class Candidate(val left: String, val right: String, val score: Double)
+        val candidates = mutableListOf<Candidate>()
+
+        for (m in allMatches) {
+            val left = clean.substring(0, m.range.first).trim()
+            val right = clean.substring(m.range.last + 1).trim()
+            if (left.length < 12 || right.length < 12) continue
+            val wordsL = left.split(Regex("""\s+""")).filter { it.isNotEmpty() }
+            val wordsR = right.split(Regex("""\s+""")).filter { it.isNotEmpty() }
+            if (wordsL.size < 3 || wordsR.size < 3) continue
+
+            val balance = minOf(wordsL.size, wordsR.size).toDouble() / maxOf(wordsL.size, wordsR.size)
+            var score = balance * 10.0
+            if (PRONOUN_SUBJECT.containsMatchIn(right)) {
+                score += 15.0
+            } else if (NAMED_CLAUSE_SUBJECT.containsMatchIn(right)) {
+                score += 12.0
+            }
+            candidates.add(Candidate(left, right, score))
+        }
+
+        if (candidates.isEmpty()) return null
+        val best = candidates.maxByOrNull { it.score } ?: return null
+        val sideA = cleanEntity(best.left)
+        val sideB = cleanEntity(best.right)
+        return if (sideA.isNotBlank() && sideB.isNotBlank() && !sideA.equals(sideB, ignoreCase = true)) {
+            sideA to sideB
+        } else null
     }
 
     private fun cleanEntity(raw: String): String =

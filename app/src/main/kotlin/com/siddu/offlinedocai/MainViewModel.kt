@@ -99,7 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Repositories
     private val documentRepository = DocumentRepository(application, database)
-    private val vectorStore = VectorStore(database.chunkDao())
+    private val vectorStore = VectorStore(database.chunkDao(), com.siddu.offlinedocai.ai.retrieval.CrossEncoderReranker.getInstance(application))
     private val chatRepository = ChatRepository(application, database, vectorStore, viewModelScope)
 
     val importState: StateFlow<DocumentRepository.ImportState> = documentRepository.importState

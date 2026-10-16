@@ -48,6 +48,23 @@ class ContextAndPromptTest {
     }
 
     @Test
+    fun fairShareSubQueryPacking() {
+        val comparison = QueryClassification(QueryIntent.COMPARISON, "q", entityA = "maintenance schedule", entityB = "construction delay")
+        val results = listOf(
+            result(1, 0, "First chunk about maintenance schedule.", 0.95f),
+            result(2, 5, "Second chunk also about maintenance schedule.", 0.90f),
+            result(3, 10, "Third chunk also about maintenance schedule.", 0.85f),
+            result(4, 20, "Chunk about construction delay due to weather.", 0.80f)
+        )
+        // With a budget that can only fit 2 chunks (~150 tokens):
+        val assembled = ContextAssembler.assemble(results, comparison, budgetTokens = 200)
+        val chunkIds = assembled.sourceBlocks.flatMap { it.chunkIds }.toSet()
+        // Must contain chunk 1 (for entityA) AND chunk 4 (for entityB), instead of being starved by chunk 2!
+        assertTrue(chunkIds.contains(1L))
+        assertTrue(chunkIds.contains(4L))
+    }
+
+    @Test
     fun adjacentChunksAreMergedAndOverlapIsNotRepeated() {
         val shared = "The warranty covers manufacturing defects for two years."
         val results = listOf(

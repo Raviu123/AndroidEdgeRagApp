@@ -76,15 +76,42 @@ object ContextAssembler {
         val unique = LinkedHashMap<Long, RetrievalResult>()
         for (r in results) unique.putIfAbsent(r.chunk.id, r)
 
-        // 2. Greedy packing in priority order.
+        // 2. Greedy packing in priority order (with fair-share representation for sub-queries).
         val headerCost = tokenCounter(WORST_CASE_HEADER)
         val selected = mutableListOf<RetrievalResult>()
+        val selectedIds = mutableSetOf<Long>()
         var used = 0
         var skippedRelevant = false
+
+        // Fair-share reservation: when multiple sub-queries exist (e.g. comparison sides or clauses),
+        // reserve at least one best candidate matching each sub-query before filling remaining budget.
+        if (classification.subQueries.size >= 2) {
+            for (sq in classification.subQueries) {
+                val sqTerms = TextAnalyzer.terms(sq).toSet()
+                if (sqTerms.isEmpty()) continue
+                val match = unique.values.firstOrNull { r ->
+                    r.chunk.id !in selectedIds && r.source != RetrievalSource.NEIGHBOR && run {
+                        val chunkTerms = TextAnalyzer.terms(listOfNotNull(r.chunk.sectionTitle, r.chunk.text).joinToString("\n")).toSet()
+                        sqTerms.any { it in chunkTerms }
+                    }
+                }
+                if (match != null) {
+                    val cost = tokenCounter(match.chunk.text) + headerCost
+                    if (used + cost <= budgetTokens) {
+                        selected.add(match)
+                        selectedIds.add(match.chunk.id)
+                        used += cost
+                    }
+                }
+            }
+        }
+
         for (r in unique.values) {
+            if (r.chunk.id in selectedIds) continue
             val cost = tokenCounter(r.chunk.text) + headerCost
             if (used + cost <= budgetTokens) {
                 selected.add(r)
+                selectedIds.add(r.chunk.id)
                 used += cost
             } else if (r.source != RetrievalSource.NEIGHBOR) {
                 skippedRelevant = true

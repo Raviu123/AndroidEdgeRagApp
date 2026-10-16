@@ -53,6 +53,21 @@ class QueryIntentRouterTest {
     }
 
     @Test
+    fun sequentialQuestions() {
+        val q1 = "Did Adam Smith send a message to Li Hua about the upcoming building maintenance schedule before the administrators announced a temporary change in the construction schedule due to weather conditions?"
+        val c1 = QueryIntentRouter.route(q1)
+        assertEquals(QueryIntent.COMPARISON, c1.intent)
+        assertEquals(2, c1.subQueries.size)
+        assertEquals("Adam Smith send a message to Li Hua about the upcoming building maintenance schedule", c1.entityA)
+        assertEquals("administrators announced a temporary change in the construction schedule due to weather conditions", c1.entityB)
+
+        val q2 = "Did Wolfgang ask Li Hua about watching \"Star Wars: A New Hope\" after he asked Li Hua about going to see \"Overwatch 3\"?"
+        val c2 = QueryIntentRouter.route(q2)
+        assertEquals(QueryIntent.COMPARISON, c2.intent)
+        assertEquals(2, c2.subQueries.size)
+    }
+
+    @Test
     fun enumerations() {
         listOf("List all the side effects", "What are the main risks?", "Name every author mentioned", "What are the steps to reset the router?", "How many employees does the company have?")
             .forEach { assertEquals(it, QueryIntent.ENUMERATION, intent(it)) }

@@ -41,3 +41,4 @@ OfflineDocAI_backup_original/
 *.onnx
 app/src/main/assets/models/llm/*.gguf
 app/src/main/assets/models/embedding/*.onnx
+app/src/main/assets/models/reranker/*.onnx

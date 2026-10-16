@@ -9,6 +9,7 @@ plugins {
 }
 
 val bundledEmbeddingSha256 = "afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1c170afc848bdb1"
+val bundledRerankerSha256 = "e9d8ebf845c413e981c175bfe49a3bfa9b3dcce2a3ba54875ee5df5a58639fbe"
 
 android {
     namespace = "com.siddu.offlinedocai"
@@ -23,6 +24,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Re-extracts the bundled embedding model whenever the asset changes (marker = its SHA-256).
         buildConfigField("String", "EMBEDDING_ASSET_SHA256", "\"$bundledEmbeddingSha256\"")
+        buildConfigField("String", "RERANKER_ASSET_SHA256", "\"$bundledRerankerSha256\"")
         ndk {
             abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
         }
@@ -73,12 +75,8 @@ kapt {
     }
 }
 
-// The embedding model is not committed to git (binary, 23 MB). Fetch it on a fresh clone and
-// verify its SHA-256 so the bundled asset is always exactly the model the code expects.
-val embeddingModelFile = file("src/main/assets/models/embedding/all-MiniLM-L6-v2.onnx")
-val embeddingModelUrl = "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model_quantized.onnx"
-val embeddingModelSha256 = bundledEmbeddingSha256
-
+// The bundled ONNX models are not committed to git (binary, ~23 MB each). Fetch them on a fresh clone
+// and verify their SHA-256 so each bundled asset is always exactly the model the code expects.
 fun sha256Of(f: File): String {
     val digest = MessageDigest.getInstance("SHA-256")
     f.inputStream().use { input ->
@@ -92,28 +90,44 @@ fun sha256Of(f: File): String {
     return digest.digest().joinToString("") { b -> "%02x".format(b) }
 }
 
-val ensureEmbeddingModel by tasks.registering {
-    description = "Downloads and verifies the bundled all-MiniLM-L6-v2 ONNX embedding model."
-    outputs.file(embeddingModelFile)
-    doLast {
-        if (embeddingModelFile.exists() && sha256Of(embeddingModelFile) == embeddingModelSha256) return@doLast
-        logger.lifecycle("Downloading embedding model from $embeddingModelUrl")
-        embeddingModelFile.parentFile.mkdirs()
-        val tmp = File(embeddingModelFile.parentFile, embeddingModelFile.name + ".part")
-        URI(embeddingModelUrl).toURL().openStream().use { input ->
-            tmp.outputStream().use { output -> input.copyTo(output) }
+fun registerBundledModel(taskName: String, label: String, target: File, url: String, sha256: String) =
+    tasks.register(taskName) {
+        description = "Downloads and verifies the bundled $label ONNX model."
+        outputs.file(target)
+        doLast {
+            if (target.exists() && sha256Of(target) == sha256) return@doLast
+            logger.lifecycle("Downloading $label from $url")
+            target.parentFile.mkdirs()
+            val tmp = File(target.parentFile, target.name + ".part")
+            URI(url).toURL().openStream().use { input ->
+                tmp.outputStream().use { output -> input.copyTo(output) }
+            }
+            val actual = sha256Of(tmp)
+            if (actual != sha256) {
+                tmp.delete()
+                throw GradleException("$label checksum mismatch: expected $sha256, got $actual")
+            }
+            if (target.exists()) target.delete()
+            if (!tmp.renameTo(target)) throw GradleException("Could not move $tmp into place")
         }
-        val actual = sha256Of(tmp)
-        if (actual != embeddingModelSha256) {
-            tmp.delete()
-            throw GradleException("Embedding model checksum mismatch: expected $embeddingModelSha256, got $actual")
-        }
-        if (embeddingModelFile.exists()) embeddingModelFile.delete()
-        if (!tmp.renameTo(embeddingModelFile)) throw GradleException("Could not move $tmp into place")
     }
-}
 
-tasks.named("preBuild") { dependsOn(ensureEmbeddingModel) }
+val ensureEmbeddingModel = registerBundledModel(
+    "ensureEmbeddingModel", "all-MiniLM-L6-v2 embedding model",
+    file("src/main/assets/models/embedding/all-MiniLM-L6-v2.onnx"),
+    "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model_quantized.onnx",
+    bundledEmbeddingSha256
+)
+
+// Cross-encoder that re-scores retrieved passages against the question (same uncased BERT vocabulary as the embedder).
+val ensureRerankerModel = registerBundledModel(
+    "ensureRerankerModel", "ms-marco-MiniLM-L-6-v2 reranker",
+    file("src/main/assets/models/reranker/ms-marco-MiniLM-L-6-v2.onnx"),
+    "https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/onnx/model_quantized.onnx",
+    bundledRerankerSha256
+)
+
+tasks.named("preBuild") { dependsOn(ensureEmbeddingModel, ensureRerankerModel) }
 
 dependencies {
     // Core AndroidX

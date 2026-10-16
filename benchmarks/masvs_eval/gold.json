@@ -1,0 +1,23 @@
+{
+  "_about": "Answer key for the 18 MASVS benchmark questions (numbered 2-19 like the evaluation sheets). 'groups': each inner list is one topic; a topic counts as retrieved when any of its pages reached the model. 'expect': the facts a good answer states, taken from OWASP_MASVS.pdf v2.1.0. 'notInDoc': the document does not cover the topic, so the right answer says so.",
+  "questions": {
+    "2":  {"groups": [[7, 11]], "expect": "Mobile Application Security Verification Standard by OWASP; industry standard / baseline for mobile app security; set of controls; used as metric, guidance and baseline during development, testing and procurement."},
+    "3":  {"groups": [[11]], "expect": "Eight control groups: STORAGE, CRYPTO, AUTH, NETWORK, PLATFORM, CODE, RESILIENCE, PRIVACY."},
+    "4":  {"groups": [[17, 18]], "expect": "STORAGE-1 app securely stores sensitive data; STORAGE-2 prevents leakage (backups, logs, public locations); covers PII, keys, secrets, API keys."},
+    "5":  {"groups": [[23, 24]], "expect": "Encrypted channel / TLS with endpoint authentication; NETWORK-1 secures all traffic per best practices; NETWORK-2 identity (certificate/public key) pinning; do not disable platform secure defaults."},
+    "6":  {"groups": [[19, 20]], "expect": "Devices are portable/lost/stolen; encryption protects sensitive data from physical access; use industry best practices (NIST); key management."},
+    "7":  {"groups": [[21, 22]], "expect": "AUTH-1 secure auth/authz protocols and best practices; AUTH-2 secure local authentication per platform best practices; AUTH-3 additional authentication (biometrics, PIN, MFA) for sensitive operations."},
+    "8":  {"groups": [[17, 18, 19, 20]], "expect": "Store sensitive data securely and prevent leakage (STORAGE-1/2); protect it with strong cryptography and proper key management (CRYPTO)."},
+    "9":  {"groups": [[27, 28, 29]], "expect": "Entry points (UI, IPC, network, file system) may carry data modified by untrusted actors; treat as untrusted, verify and sanitize; prevents SQL injection, XSS, insecure deserialization; CODE-4."},
+    "10": {"groups": [[21, 22]], "notInDoc": true, "expect": "The document does not discuss session management; at most relate to AUTH controls and say the topic is not covered."},
+    "11": {"groups": [[17, 18]], "expect": "Unintentional exposure of PII, keys, secrets: stored in public locations, leaked via backups, logs, system/APIs; other apps or attackers can access it."},
+    "12": {"groups": [[23, 24]], "expect": "Encrypt traffic (TLS), authenticate endpoint, NETWORK-1 secure all traffic, NETWORK-2 identity/certificate pinning."},
+    "13": {"groups": [[33, 34, 35]], "expect": "Baseline for privacy (not full GDPR/ENISA coverage); PRIVACY-1 minimize data/resources access; PRIVACY-2 prevent identification; PRIVACY-3 transparency about data collection; PRIVACY-4 user control over data."},
+    "14": {"groups": [[30, 31, 32]], "expect": "Increase resistance to reverse engineering and tampering to protect IP / business assets and against client-side attacks; platform integrity, anti-tampering, anti-static and anti-dynamic analysis; defense in depth, not a replacement for other controls."},
+    "15": {"groups": [[19, 20]], "expect": "CRYPTO-2 key management per best practices across the lifecycle: generation, storage, protection; poor key management breaks strong crypto; NIST SP 800-57."},
+    "16": {"groups": [[17, 18], [19, 20]], "expect": "Storage controls keep sensitive data in protected locations and prevent leaks; cryptography encrypts it so a lost/stolen device does not expose it; depends on proper key management."},
+    "17": {"groups": [[21, 22]], "notInDoc": true, "expect": "Authentication/authorization verify users and control access (protocols, local auth, extra factors); session management is not covered by the document and should be said so."},
+    "18": {"groups": [[23, 24]], "expect": "TLS encryption + endpoint authentication protect confidentiality/integrity in transit; certificate validation and pinning (trusting only specific CAs) stop MITM; avoid bypassing platform defaults."},
+    "19": {"groups": [[17, 18], [33, 34, 35], [19, 20]], "expect": "Storage keeps data in safe locations and prevents leaks; cryptography encrypts it; privacy minimizes collected data, prevents identification and gives users transparency and control."}
+  }
+}
