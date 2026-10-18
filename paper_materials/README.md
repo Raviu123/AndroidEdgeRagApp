@@ -19,6 +19,7 @@ This directory is designed as a self-contained, modular knowledge repository for
 | [`05_EXPERIMENTS_RESULTS_AND_ABLATIONS.md`](05_EXPERIMENTS_RESULTS_AND_ABLATIONS.md) | Quantitative experimental tables, multi-metric evaluations (Recall@k, MRR, RAGAS, TTFT, TPS, RAM), and 6-stage ablation studies ($A_0$ to $A_5$). | **Section 5 (Empirical Evaluation & Ablation Studies)** |
 | [`06_DISCUSSION_LIMITATIONS_AND_CONCLUSION.md`](06_DISCUSSION_LIMITATIONS_AND_CONCLUSION.md) | Edge trade-offs, theoretical implications, failure analysis, future directions, and concluding summary. | **Section 6 (Discussion & Limitations)**, **Section 7 (Conclusion)** |
 | [`07_BIBTEX_REFERENCES.bib`](07_BIBTEX_REFERENCES.bib) | Standardized, camera-ready BibTeX citations for all related papers, foundational SLM papers, and indexing literature. | **References / Bibliography** |
+| [`08_POST_DRAFT_V4_RAG_CHANGES_AND_EXPERIMENTS.md`](08_POST_DRAFT_V4_RAG_CHANGES_AND_EXPERIMENTS.md) | Exhaustive post-v4 RAG pipeline upgrades (ONNX Cross-Encoder, model tiers, temporal routing), MASVS & LiHua benchmarks, and 1.5B model placeholders. | **Section 3, 4 & 5 (Post-Draft v4 Updates)** |
 
 ---
 

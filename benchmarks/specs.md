@@ -1,0 +1,5 @@
+Model Size                      │ Model Tier in Code │ Evidence Cap (General Query)                       │ Evidence Cap (Comparison / Sequential) │ Approx. Chunks in Promp
+─────────────────────────────────┼────────────────────┼────────────────────────────────────────────────────┼────────────────────────────────────────┼────────────────────────
+0.5B (Qwen 0.5B, SmolLM)        │ ModelTier.TINY     │ 900 tokens (often throttled to 600 by phone tuner) │ 1,300 tokens                           │ 2 – 4 chunks
+1.0B (Llama 3.2 1B)             │ ModelTier.SMALL    │ 1,300 tokens                                       │ 1,700 tokens                           │ 6 – 9 chunks
+1.5B (Qwen 1.5B, DeepSeek 1.5B) │ ModelTier.STANDARD │ 2,000 tokens                                       │ 2,400 tokens                           │ 10 – 15 chunks

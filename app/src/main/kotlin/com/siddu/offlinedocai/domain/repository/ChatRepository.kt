@@ -98,15 +98,27 @@ class ChatRepository(
         /**
          * Upper bounds on evidence tokens. The real limit is what fits in the model's context window;
          * these caps keep prompt-processing time reasonable on phone CPUs (prefill is roughly linear in
-         * prompt length) and stop small models from being diluted by marginal passages: a 0.5B model
-         * answers best from a handful of passages and copies off-topic ones when shown a dozen.
+         * prompt length) and stop models from being diluted by marginal passages:
+         * - Broad/structural intents (SUMMARY, ENUMERATION) get the maximum budget to cover the whole topic.
+         * - Focused single-topic queries (GENERAL) get a moderate budget.
+         * - Pairwise comparisons (COMPARISON with sub-queries) get a focused budget (~1000-1400 tokens)
+         *   so each side gets 2-3 precise chunks without flooding the model with unrelated sections.
          */
-        fun evidenceCap(intent: QueryIntent, tier: ModelTier = ModelTier.STANDARD): Int {
-            val focused = intent == QueryIntent.GENERAL
-            return when (tier) {
-                ModelTier.TINY -> if (focused) 900 else 1300
-                ModelTier.SMALL -> if (focused) 1300 else 1700
-                ModelTier.STANDARD -> if (focused) 2000 else 2400
+        fun evidenceCap(intent: QueryIntent, tier: ModelTier = ModelTier.STANDARD): Int = when (tier) {
+            ModelTier.TINY -> when (intent) {
+                QueryIntent.SUMMARY, QueryIntent.ENUMERATION -> 1300
+                QueryIntent.COMPARISON -> 800
+                else -> 900
+            }
+            ModelTier.SMALL -> when (intent) {
+                QueryIntent.SUMMARY, QueryIntent.ENUMERATION -> 1800
+                QueryIntent.COMPARISON -> 1100
+                else -> 1400
+            }
+            ModelTier.STANDARD -> when (intent) {
+                QueryIntent.SUMMARY, QueryIntent.ENUMERATION -> 2400
+                QueryIntent.COMPARISON -> 1300
+                else -> 2000
             }
         }
 

@@ -131,8 +131,10 @@ object ContextAssembler {
             }
         }
 
-        // 4. Block order: open questions lead with the best evidence; structural intents read in document order.
-        val blockOrder = if (intent == QueryIntent.GENERAL || intent == QueryIntent.COMPARISON) {
+        // 4. Block order: open questions (GENERAL) lead with the best evidence;
+        // sequential, comparison, and structural intents read in natural document order so cause-and-effect
+        // and timelines flow chronologically.
+        val blockOrder = if (intent == QueryIntent.GENERAL) {
             groups.sortedByDescending { g -> g.maxOf { it.relevanceScore } }
         } else groups
 
