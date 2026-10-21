@@ -61,7 +61,7 @@ class VectorStore(private val chunkDao: ChunkDao, var reranker: PassageReranker?
         const val MIN_DENSE = 0.20f
         private const val BM25_K1 = 1.2
         private const val BM25_B = 0.75
-        private const val NEIGHBOR_SEEDS = 6
+        private const val NEIGHBOR_SEEDS = 12
         private const val SUMMARY_SAMPLES = 24
         /** Fused candidates the cross-encoder re-scores (cost grows linearly: ~one passage per 10–40 ms on phone CPUs). */
         const val RERANK_POOL = 24

@@ -83,6 +83,10 @@ object ContextAssembler {
         var used = 0
         var skippedRelevant = false
 
+        // Predecessor companion lookup map: allow high-priority chunks to bring along their immediate
+        // predecessor/successor chunks from the candidate pool to complete boundaries and headers.
+        val candidatesByPosition = unique.values.associateBy { it.chunk.documentId to it.chunk.chunkIndex }
+
         // Fair-share reservation: when multiple sub-queries exist (e.g. comparison sides or clauses),
         // guarantee balanced representation so neither side gets crowded out by the other.
         if (classification.subQueries.size >= 2) {
@@ -110,6 +114,17 @@ object ContextAssembler {
                         selectedIds.add(cand.chunk.id)
                         used += cost
                         count++
+
+                        // Pull predecessor if present to restore missing headers/speaker/context
+                        val predecessor = candidatesByPosition[cand.chunk.documentId to cand.chunk.chunkIndex - 1]
+                        if (predecessor != null && predecessor.chunk.id !in selectedIds) {
+                            val predCost = tokenCounter(predecessor.chunk.text) + headerCost
+                            if (used + predCost <= budgetTokens) {
+                                selected.add(predecessor)
+                                selectedIds.add(predecessor.chunk.id)
+                                used += predCost
+                            }
+                        }
                     }
                 }
             }
@@ -122,6 +137,19 @@ object ContextAssembler {
                 selected.add(r)
                 selectedIds.add(r.chunk.id)
                 used += cost
+
+                // When pulling primary hits, prioritize pulling their predecessor neighbor if available
+                if (r.source != RetrievalSource.NEIGHBOR) {
+                    val predecessor = candidatesByPosition[r.chunk.documentId to r.chunk.chunkIndex - 1]
+                    if (predecessor != null && predecessor.chunk.id !in selectedIds) {
+                        val predCost = tokenCounter(predecessor.chunk.text) + headerCost
+                        if (used + predCost <= budgetTokens) {
+                            selected.add(predecessor)
+                            selectedIds.add(predecessor.chunk.id)
+                            used += predCost
+                        }
+                    }
+                }
             } else if (r.source != RetrievalSource.NEIGHBOR) {
                 skippedRelevant = true
             }

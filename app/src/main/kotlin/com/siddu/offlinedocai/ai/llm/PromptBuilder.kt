@@ -38,7 +38,7 @@ object PromptBuilder {
         append("Rules:\n")
         append("- Answer exactly the question that is asked, using only facts written in the sources. Do not guess or add outside knowledge.\n")
         append("- Some sources may be about other topics. Use only the sources that are about the question and ignore the rest.\n")
-        append("- If the question asks a yes/no or \"Did / Is / Does / Was / Were\" question, begin directly with \"Yes,\" or \"No,\" followed by a concise factual explanation based on the sources.\n")
+        append("- If the question asks a yes/no or \"Did / Is / Does / Was / Were\" question, begin directly with \"Yes,\" or \"No,\" followed by a factual explanation based on the sources.\n")
         append("- For questions asking about order or whether one event happened before/after another, compare their dates, times, headers, or narrative positions in the sources.\n")
         append("- If the sources do not contain the answer, reply exactly: \"$NOT_FOUND_ANSWER\"\n")
         append("- If the sources answer only part of the question, answer that part and say which part the document does not cover.\n")
