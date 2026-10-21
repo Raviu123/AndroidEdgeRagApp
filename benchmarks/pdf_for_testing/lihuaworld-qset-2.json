@@ -1,0 +1,177 @@
+[
+  {
+    "id": 15,
+    "question": "Did Li Hua ask Jennifer Moore for book recommendations on fitness nutrition before she announced the special guest speaker at the gym?",
+    "answer": "No",
+    "evidence": "20260713_19:30<and>20260817_12:15<and>20260831_19:00",
+    "type": "Multi"
+  },
+  {
+    "id": 16,
+    "question": "Did Jennifer remind Li Hua about proper nutrition and hydration before Jake shared his tips for staying hydrated during the match?",
+    "answer": "Yes",
+    "evidence": "20260804_14:00<and>20261001_18:00",
+    "type": "Multi"
+  },
+  {
+    "id": 17,
+    "question": "Did the group members talk about their favorite characters in the TV series Game of Thrones after Emily started a vote on the most hateable character?",
+    "answer": "Yes",
+    "evidence": "20260902_16:00<and>20260915_12:00",
+    "type": "Multi"
+  },
+  {
+    "id": 19,
+    "question": "Did Li Hua ask Thane about his opinion on The Last of Us before he asked about Sekiro: Shadows Die Twice?",
+    "answer": "No",
+    "evidence": "20261001_20:00<and>20261228_14:00",
+    "type": "Multi"
+  },
+  {
+    "id": 20,
+    "question": "Did Jake Watson and Li Hua discuss the classic matches between FC Barcelona and FC Bayern Munich before the group members discussed the classic matches between FC Barcelona and Real Madrid?",
+    "answer": "Yes",
+    "evidence": "20261005_10:05<and>20261026_16:00",
+    "type": "Multi"
+  },
+  {
+    "id": 21,
+    "question": "Did the group members debate about the best football manager in the Premier League history after they debated if Pep Guardiola is the greatest soccer manager in football history?",
+    "answer": "Yes",
+    "evidence": "20261006_10:00<and>20261110_10:00",
+    "type": "Multi"
+  },
+  {
+    "id": 22,
+    "question": "Did the discussion about Jaime Lannister's character occur after the discussion about Cersei Lannister's character?",
+    "answer": "Yes",
+    "evidence": "20261010_10:10<and>20261026_20:00",
+    "type": "Multi"
+  },
+  {
+    "id": 23,
+    "question": "Did Wolfgang ask Li Hua if she wants to have pizza for dinner after work today before he wondered if she wanted to have Sichuan hot pot for dinner tonight?",
+    "answer": "No",
+    "evidence": "20260930_16:00<and>20261015_15:00",
+    "type": "Multi"
+  },
+  {
+    "id": 24,
+    "question": "Did Jennifer challenge Li Hua to do 60 pull-ups in a training session after she challenged him to do 100 pushups?",
+    "answer": "Yes",
+    "evidence": "20261104_18:00<and>20261129_19:00",
+    "type": "Multi"
+  },
+  {
+    "id": 25,
+    "question": "Did Jake share common knowledge about offside in soccer with Li Hua before he passed practical techniques to Li Hua on how to avoid offside for a forward?",
+    "answer": "Yes",
+    "evidence": "20261105_15:00<and>20261130_11:30",
+    "type": "Multi"
+  },
+  {
+    "id": 26,
+    "question": "Did Wolfgang arrive in Hong Kong after he informed Li Hua about his upcoming trip?",
+    "answer": "Yes",
+    "evidence": "20261219_19:00<and>20261223_23:00",
+    "type": "Multi"
+  },
+  {
+    "id": 49,
+    "question": "Did Li Hua agree to have dinner with Wolfgang after he told Wolfgang about the lunch arrangement?",
+    "answer": "Yes",
+    "evidence": "20260105_11:00<and>20260930_16:00",
+    "type": "Multi"
+  },
+  {
+    "id": 50,
+    "question": "Did Li Hua ask Wolfgang Schulz for a recommendation on a gym or fitness center before asking Jennifer Moore for book recommendations on fitness nutrition?",
+    "answer": "Yes",
+    "evidence": "20260111_08:00<and>20260831_19:00",
+    "type": "Multi"
+  },
+  {
+    "id": 71,
+    "question": "What does Li Hua ask Adam about the door hinge?",
+    "answer": "a small repair",
+    "evidence": "20260107_15:00",
+    "type": "Single"
+  },
+  {
+    "id": 72,
+    "question": "What is the name of the gym that Wolfgang recommended LiHua to go to?",
+    "answer": "FitZone",
+    "evidence": "20260111_08:00",
+    "type": "Single"
+  },
+  {
+    "id": 73,
+    "question": "When does Li Hua ask Jennifer Moore about adjusting the protein in her meal plan?",
+    "answer": "20260122",
+    "evidence": "20260122_15:00<and>20260122_15:00",
+    "type": "Multi"
+  },
+  {
+    "id": 76,
+    "question": "When does Li Hua plan to celebrate Chinese Lunar New Year?",
+    "answer": "20260118",
+    "evidence": "20260113_11:00",
+    "type": "Single"
+  },
+  {
+    "id": 77,
+    "question": "What does Li Hua plan to celebrate Chinese Lunar New Year?",
+    "answer": "dumplings",
+    "evidence": "20260113_11:00",
+    "type": "Single"
+  },
+  {
+    "id": 78,
+    "question": "Who does Li Hua plan to celebrate Chinese Lunar New Year with?",
+    "answer": "Wolfgang",
+    "evidence": "20260113_11:00",
+    "type": "Single"
+  },
+  {
+    "id": 79,
+    "question": "Li Hua accidentally broke a light fixture once. What did Adam say about the light fixture?",
+    "answer": "I'll arrange for a professional to take a look",
+    "evidence": "20260108_19:00",
+    "type": "Single"
+  },
+  {
+    "id": 80,
+    "question": "Li Hua has a difficult client. When did he solve that client's project?",
+    "answer": "20260209",
+    "evidence": "20260123_17:30<and>20260209_21:00",
+    "type": "Multi"
+  },
+  {
+    "id": 81,
+    "question": "When did Li Hua express frustration about a client changing requirements?",
+    "answer": "20260131_14:00",
+    "evidence": "20260131_14:00",
+    "type": "Single"
+  },
+  {
+    "id": 82,
+    "question": "Who suggested Li Hua keep a clear log of all the changes requested by the client?",
+    "answer": "Wolfgang Schulz",
+    "evidence": "20260131_14:00",
+    "type": "Single"
+  },
+  {
+    "id": 83,
+    "question": "What did Wolfgang Schulz suggest Li Hua to do when Li Hua face a difficult client?",
+    "answer": "keep a clear log of all the changes requested by the client",
+    "evidence": "20260131_14:00",
+    "type": "Single"
+  },
+  {
+    "id": 573,
+    "question": "What type of equipment does Wolfgang Schulz use when he works out at the gym?",
+    "answer": "Insufficient information",
+    "evidence": "N/A",
+    "type": "Null"
+  }
+]

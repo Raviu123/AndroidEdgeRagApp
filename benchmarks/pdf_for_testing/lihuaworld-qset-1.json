@@ -1,0 +1,177 @@
+[
+  {
+    "id": 0,
+    "question": "Did Adam Smith send a message to Li Hua about the upcoming building maintenance schedule before the administrators announced a temporary change in the construction schedule due to weather conditions?",
+    "answer": "Yes",
+    "evidence": "20260121_10:00<and>20260701_10:00",
+    "type": "Multi"
+  },
+  {
+    "id": 1,
+    "question": "Did Wolfgang ask Li Hua about watching \"Star Wars: A New Hope\" after he asked Li Hua about going to see \"Overwatch 3\"?",
+    "answer": "Yes",
+    "evidence": "20260121_13:00<and>20261009_17:00",
+    "type": "Multi"
+  },
+  {
+    "id": 2,
+    "question": "Did Li Hua agree to go out for dinner after Wolfgang first asked him if he wanted to go out for dinner?",
+    "answer": "Yes",
+    "evidence": "20260123_17:00<and>20260930_16:00",
+    "type": "Multi"
+  },
+  {
+    "id": 3,
+    "question": "Did Li Hua send a message to Jennifer thanking her for the new training schedule before he requested a change in his training schedule for Thursday?",
+    "answer": "Yes",
+    "evidence": "20260204_15:00<and>20260204_16:00<and>20260211_19:00",
+    "type": "Multi"
+  },
+  {
+    "id": 4,
+    "question": "Did Li Hua ask Jennifer for advice on how to prevent muscle soreness after an intense workout session before he told her that he feels soreness in his arm muscles after the workout this week?",
+    "answer": "Yes",
+    "evidence": "20260206_16:00<and>20260811_11:00<and>20261008_14:00<and>20261211_11:00",
+    "type": "Multi"
+  },
+  {
+    "id": 5,
+    "question": "Did Li Hua send a message to Jennifer asking for her opinion on protein supplements before he consulted her about his daily protein powder consumption?",
+    "answer": "Yes",
+    "evidence": "20260214_16:00<and>20261120_20:00",
+    "type": "Multi"
+  },
+  {
+    "id": 6,
+    "question": "Did Yuriko ask Li Hua for help with her studio's homepage before she booked a seat at the \"Central Perk\" cafe?",
+    "answer": "Yes",
+    "evidence": "20260223_15:00<and>20260225_15:00",
+    "type": "Multi"
+  },
+  {
+    "id": 7,
+    "question": "Did Li Hua discuss his progress with the fitness plan before he shared a blog post about his recent fitness achievements?",
+    "answer": "Yes",
+    "evidence": "20260305_17:00<and>20260325_19:00<and>20260610_16:00<and>20260630_18:00<and>20260708_14:00<and>20260817_12:15<and>20261022_22:00<and>20261202_14:00",
+    "type": "Multi"
+  },
+  {
+    "id": 8,
+    "question": "Did Li Hua send a message to Jennifer asking if he can turn the Thursday class to Friday after he requested a change in his training schedule for Thursday?",
+    "answer": "Yes",
+    "evidence": "20260211_19:00<and>20260309_12:00",
+    "type": "Multi"
+  },
+  {
+    "id": 9,
+    "question": "Did Li Hua ask Yuriko to play music together before Wolfgang proposed to pause playing musical instruments?",
+    "answer": "Yes",
+    "evidence": "20260318_15:10<and>20260416_21:00",
+    "type": "Multi"
+  },
+  {
+    "id": 10,
+    "question": "Did Wolfgang Schulz recommend the band learns \"Viva la Vida\" by Coldplay after he and Li Hua discussed what song to play this Sunday?",
+    "answer": "Yes",
+    "evidence": "20260318_15:30<and>20260625_19:00",
+    "type": "Multi"
+  },
+  {
+    "id": 11,
+    "question": "Did Wolfgang's promotion announcement occur before he invited Li Hua for dinner on 20260430?",
+    "answer": "Yes",
+    "evidence": "20260428_18:30<and>20260930_16:00",
+    "type": "Multi"
+  },
+  {
+    "id": 12,
+    "question": "Did Turalyon announce the construction updates and feedback from residents after Illidan Stormrage complained about the construction noise?",
+    "answer": "Yes",
+    "evidence": "20260526_15:40<and>20260527_10:00<and>20260528_15:00",
+    "type": "Multi"
+  },
+  {
+    "id": 13,
+    "question": "Did Hailey announce the new line of high-protein breads before inviting Li Hua to the special bakery event?",
+    "answer": "Yes",
+    "evidence": "20260611_12:45<and>20260622_13:30",
+    "type": "Multi"
+  },
+  {
+    "id": 14,
+    "question": "Did Chae tell Li Hua that taking a warm shower before sleeping can improve the sleep quality before sharing the neuroscience article with her?",
+    "answer": "No",
+    "evidence": "20260711_11:00<and>20260926_10:30",
+    "type": "Multi"
+  },
+  {
+    "id": 62,
+    "question": "What time does Li Hua check in with Adam about moving in?",
+    "answer": "5:30 PM",
+    "evidence": "20260105_14:00",
+    "type": "Single"
+  },
+  {
+    "id": 63,
+    "question": "When was the first time Li Hua had dinner with Wolfgang this year?",
+    "answer": "20260108",
+    "evidence": "20260108_11:00",
+    "type": "Single"
+  },
+  {
+    "id": 64,
+    "question": "Where was the first time Li Hua had dinner with Wolfgang this year?",
+    "answer": "the cozy café downtown",
+    "evidence": "20260108_11:00",
+    "type": "Single"
+  },
+  {
+    "id": 65,
+    "question": "What time is Li Hua's lunch with Wolfgang Schulz at the cozy café downtown?",
+    "answer": "20260108",
+    "evidence": "20260108_11:00",
+    "type": "Single"
+  },
+  {
+    "id": 66,
+    "question": "What is the Wi-Fi password at Li Hua's house?",
+    "answer": "Family123",
+    "evidence": "20260106_09:00",
+    "type": "Single"
+  },
+  {
+    "id": 67,
+    "question": "What does Adam say about having friends over?",
+    "answer": "having friends over occasionally is fine",
+    "evidence": "20260106_09:00",
+    "type": "Single"
+  },
+  {
+    "id": 68,
+    "question": "What house rule does Adam mention?",
+    "answer": "keep noise to a minimum during late hours",
+    "evidence": "20260106_09:00",
+    "type": "Single"
+  },
+  {
+    "id": 69,
+    "question": "What does Li Hua report to Adam on January 6th?",
+    "answer": "the water tab in the apartment is broken",
+    "evidence": "20260106_13:00",
+    "type": "Single"
+  },
+  {
+    "id": 70,
+    "question": "When does Adam confirm the plumber will arrive?",
+    "answer": "tomorrow at 10 AM",
+    "evidence": "20260106_15:00",
+    "type": "Single"
+  },
+  {
+    "id": 572,
+    "question": "What time will Li Hua and Wolfgang meet for breakfast on the morning of the 9th?",
+    "answer": "Insufficient information",
+    "evidence": "N/A",
+    "type": "Null"
+  }
+]

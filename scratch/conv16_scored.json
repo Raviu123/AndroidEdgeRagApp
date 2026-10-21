@@ -1,0 +1,177 @@
+[
+  {
+    "index": 1,
+    "question": "Did Adam Smith send a message to Li Hua about the upcoming building maintenance schedule before the administrators announced a temporary change in the construction schedule due to weather conditions?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, Adam Smith did not send a message to Li Hua about the upcoming building maintenance schedule before the administrators announced a temporary change in the construction schedule due to weather conditions. The sources indicate that Adam Smith sent messages related to maintenance issues and rent payments, but not specifically about upcoming building maintenance schedules before the change in construction schedule due to weather."
+  },
+  {
+    "index": 2,
+    "question": "Did Wolfgang ask Li Hua about watching \"Star Wars: A New Hope\" after he asked Li Hua about going to see \"Overwatch 3\"?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, based on the sources provided, Wolfgang did not ask Li Hua about watching \"Star Wars: A New Hope\" after he asked Li Hua about going to see \"Overwatch 3\". The sources do not mention any conversation between Wolfgang and Li Hua regarding watching a Star Wars movie after they discussed seeing Overwatch."
+  },
+  {
+    "index": 3,
+    "question": "Did Li Hua agree to go out for dinner after Wolfgang first asked him if he wanted to go out for dinner?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, Li Hua did not agree to go out for dinner after Wolfgang first asked him if he wanted to go. The sources indicate that Li Hua initially said no, as she was busy and had plans for another day. She then agreed to come over later in the week when Wolfgang invited her again. The sources do not show Li Hua agreeing to go out specifically after Wolfgang's initial invitation."
+  },
+  {
+    "index": 4,
+    "question": "Did Li Hua send a message to Jennifer thanking her for the new training schedule before he requested a change in his training schedule for Thursday?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, Li Hua did not send a message to Jennifer thanking her for the new training schedule before he requested a change in his training schedule for Thursday. The sources indicate that Li Hua was already planning to request changes to his training schedule, but Jennifer had not yet adjusted the original plan."
+  },
+  {
+    "index": 5,
+    "question": "Did Li Hua ask Jennifer for advice on how to prevent muscle soreness after an intense workout session before he told her that he feels soreness in his arm muscles after the workout this week?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "Yes, Li Hua asked Jennifer for advice on how to prevent muscle soreness after an intense workout session before he told her that he feels soreness in his arm muscles after the workout this week. According to Source 1, Li Hua initially asked for tips on dealing with muscle soreness right after their workout sessions. Later in Source 2, Jennifer provided a list of tips to prevent muscle soreness, including warm-up and cool-down activities, hydration, active recovery like gentle yoga or walking, and foam rolling. Finally, in Source 3, Jennifer asked Li Hua about the soreness in his arm after their bench press session, indicating that she had already been informed of this issue."
+  },
+  {
+    "index": 6,
+    "question": "Did Li Hua send a message to Jennifer asking for her opinion on protein supplements before he consulted her about his daily protein powder consumption?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, Li Hua did not send a message to Jennifer asking for her opinion on protein supplements before he consulted her about his daily protein powder consumption. The sources do not mention any communication between Li Hua and Jennifer regarding protein supplements or opinions on them."
+  },
+  {
+    "index": 7,
+    "question": "Did Yuriko ask Li Hua for help with her studio's homepage before she booked a seat at the \"Central Perk\" cafe?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, based on the sources provided, Yuriko did not ask Li Hua for help with her studio's homepage before she booked a seat at \"Central Perk\" cafe. The sources indicate that Yuriko had already booked the seat and was looking forward to discussing her studio's homepage improvements with Li Hua after their meeting at \"Central Perk\" on Thursday."
+  },
+  {
+    "index": 8,
+    "question": "Did Li Hua discuss his progress with the fitness plan before he shared a blog post about his recent fitness achievements?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "Yes, Li Hua discussed his progress with the fitness plan before he shared a blog post about his recent fitness achievements. In Source 1, Jennifer Moore mentions that Li Hua is \"totally hooked on my fitness journey\" and wants to share some progress with her. This indicates that they had a discussion about his fitness plan before the blog post was shared."
+  },
+  {
+    "index": 9,
+    "question": "Did Li Hua send a message to Jennifer asking if he can turn the Thursday class to Friday after he requested a change in his training schedule for Thursday?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, Li Hua did not send a message to Jennifer asking if he can turn the Thursday class to Friday after requesting a change in his training schedule for Thursday. The sources do not contain any information about such a message or request."
+  },
+  {
+    "index": 10,
+    "question": "Did Li Hua ask Yuriko to play music together before Wolfgang proposed to pause playing musical instruments?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, based on the sources provided, Li Hua asked Yuriko to play music together before Wolfgang proposed that they pause playing musical instruments. The conversation shows that Li Hua invited Yuriko and Wolfgang for jam sessions, indicating an intention to play music together rather than a proposal to pause playing instruments."
+  },
+  {
+    "index": 11,
+    "question": "Did Wolfgang Schulz recommend the band learns \"Viva la Vida\" by Coldplay after he and Li Hua discussed what song to play this Sunday?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, Wolfgang Schulz did not recommend the band learn \"Viva la Vida\" by Coldplay after he and Li Hua discussed what song to play this Sunday. The sources indicate that they were discussing which songs to play for their jam session, but Wolfgang Schulz explicitly stated he had not heard \"Viva la Vida\" by Coldplay and did not recommend it. Li Hua also expressed that she was thinking of playing a mix-up of classics and new ones, indicating they were still discussing the song selection for their jam session."
+  },
+  {
+    "index": 12,
+    "question": "Did Wolfgang's promotion announcement occur before he invited Li Hua for dinner on 20260430?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, Wolfgang's promotion announcement did not occur before he invited Li Hua for dinner on 20260430. The sources indicate that the invitation to dinner was made on 2021-04-30, which is earlier than Wolfgang's promotion announcement on 2025-06-09."
+  },
+  {
+    "index": 13,
+    "question": "Did Turalyon announce the construction updates and feedback from residents after Illidan Stormrage complained about the construction noise?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, based on the sources provided, Turalyon did not announce construction updates and feedback from residents after Illidan Stormrage complained about the noise. The relevant conversation only mentions that Illidan Stormrage suggested planning quiet hours for children during playtime, but does not indicate any announcement of updates or feedback from residents."
+  },
+  {
+    "index": 14,
+    "question": "Did Hailey announce the new line of high-protein breads before inviting Li Hua to the special bakery event?",
+    "gold": "Yes",
+    "type": "Multi",
+    "model_answer": "No, Hailey did not announce the new line of high-protein breads before inviting Li Hua to the special bakery event. The sources indicate that Hailey announced this news on April 15, 2026, during their anniversary event celebrating a new line of gluten-free bread options. Li Hua was invited to this event and expressed interest in trying the high-protein breads, but Hailey did not mention announcing these new breads specifically before inviting Li Hua."
+  },
+  {
+    "index": 15,
+    "question": "Did Chae tell Li Hua that taking a warm shower before sleeping can improve the sleep quality before sharing the neuroscience article with her?",
+    "gold": "No",
+    "type": "Multi",
+    "model_answer": "No, based on the sources provided, Chae did not tell Li Hua that taking a warm shower before sleeping can improve sleep quality. The relevant source states: \"ChaeSong-hwa: You’ll love it! Just unwind and let the stress of the day wash away. Can't wait to hear how it goes!\" This indicates that Chae shared a tip about taking a warm shower, but did not mention its effect on sleep quality."
+  },
+  {
+    "index": 16,
+    "question": "What time does Li Hua check in with Adam about moving in?",
+    "gold": "5:30 PM",
+    "type": "Single",
+    "model_answer": "According to the sources, Li Hua checks in with Adam about moving in at 5:30 PM on January 6th."
+  },
+  {
+    "index": 17,
+    "question": "When was the first time Li Hua had dinner with Wolfgang this year?",
+    "gold": "20260108",
+    "type": "Single",
+    "model_answer": "I couldn't find this in the selected document(s)."
+  },
+  {
+    "index": 18,
+    "question": "Where was the first time Li Hua had dinner with Wolfgang this year?",
+    "gold": "the cozy café downtown",
+    "type": "Single",
+    "model_answer": "I couldn't find this in the selected document(s)."
+  },
+  {
+    "index": 19,
+    "question": "What time is Li Hua's lunch with Wolfgang Schulz at the cozy café downtown?",
+    "gold": "20260108",
+    "type": "Single",
+    "model_answer": "According to the sources, Li Hua's lunch with Wolfgang Schulz at the cozy café downtown is scheduled for 12:00."
+  },
+  {
+    "index": 20,
+    "question": "What is the Wi-Fi password at Li Hua's house?",
+    "gold": "Family123",
+    "type": "Single",
+    "model_answer": "The Wi-Fi password at Li Hua's house is \"Family123\"."
+  },
+  {
+    "index": 21,
+    "question": "What does Adam say about having friends over?",
+    "gold": "having friends over occasionally is fine",
+    "type": "Single",
+    "model_answer": "Adam says that having friends over occasionally is fine, but he advises to keep the gatherings reasonable."
+  },
+  {
+    "index": 22,
+    "question": "What house rule does Adam mention?",
+    "gold": "keep noise to a minimum during late hours",
+    "type": "Single",
+    "model_answer": "Adam mentions that there are no specific house rules mentioned in the sources provided."
+  },
+  {
+    "index": 23,
+    "question": "What does Li Hua report to Adam on January 6th?",
+    "gold": "the water tab in the apartment is broken",
+    "type": "Single",
+    "model_answer": "I couldn't find this in the selected document(s)."
+  },
+  {
+    "index": 24,
+    "question": "When does Adam confirm the plumber will arrive?",
+    "gold": "tomorrow at 10 AM",
+    "type": "Single",
+    "model_answer": "Adam confirms the plumber will arrive tomorrow at 10 AM."
+  },
+  {
+    "index": 25,
+    "question": "What time will Li Hua and Wolfgang meet for breakfast on the morning of the 9th?",
+    "gold": "Insufficient information",
+    "type": "Null",
+    "model_answer": "I couldn't find this in the selected document(s)."
+  }
+]

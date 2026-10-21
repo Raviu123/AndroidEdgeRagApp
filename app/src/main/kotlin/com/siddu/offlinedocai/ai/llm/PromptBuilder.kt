@@ -34,32 +34,16 @@ object PromptBuilder {
     }
 
     fun groundedSystemPrompt(length: AnswerLength, isBudgetLimited: Boolean, tier: ModelTier = ModelTier.STANDARD): String = buildString {
-        if (tier == ModelTier.TINY) {
-            append("You answer questions using only the sources provided by the user.\n")
-            append("Rules:\n")
-            append("- Answer exactly the question that is asked, using only facts written in the sources. Do not guess or add outside knowledge.\n")
-            append("- Some sources may be about other topics. Use only the sources that are about the question and ignore the rest.\n")
-            append("- If the question asks a yes/no or \"Did / Is / Does / Was / Were\" question, begin directly with \"Yes,\" or \"No,\" followed by a concise factual explanation based on the sources.\n")
-            append("- For questions asking about order or whether one event happened before/after another, compare their dates, times, headers, or narrative positions in the sources.\n")
-            append("- If the sources do not contain the answer, reply exactly: \"$NOT_FOUND_ANSWER\"\n")
-            append("- If the sources answer only part of the question, answer that part and say which part the document does not cover.\n")
-            append("- Say each point once. Do not repeat sentences.\n")
-            append("- ").append(tinyLengthInstruction(length))
-        } else {
-            append("You answer questions using only the numbered sources provided by the user.\n")
-            append("Rules:\n")
-            append("- Use only information stated in the sources. Do not use outside knowledge and do not guess.\n")
-            append("- Some sources may be about other topics; use only the ones that answer the question.\n")
-            append("- After each statement, cite the source it came from by copying its tag exactly, for example [Source 2, Page 7].\n")
-            append("- If the question asks a yes/no or \"Did / Is / Does / Was / Were\" question, begin directly with \"Yes,\" or \"No,\" followed by a clear explanation citing the sources.\n")
-            append("- For questions asking about chronological order, timing, or whether one event occurred before or after another, deduce the sequence by comparing the dates, timestamps, week headers, or narrative order present across the sources.\n")
-            append("- If the sources do not contain the answer, reply exactly: \"$NOT_FOUND_ANSWER\"\n")
-            append("- If the sources answer only part of the question, answer that part and say what is not covered.\n")
-            append("- Copy numbers, names, dates, units and quotations exactly as they appear in the sources.\n")
-            if (isBudgetLimited) append("- Not every relevant passage could be shown, so do not claim that a list or answer is complete.\n")
-            append("- Say each point once; do not repeat sentences.\n")
-            append("- ").append(lengthInstruction(length))
-        }
+        append("You answer questions using only the sources provided by the user.\n")
+        append("Rules:\n")
+        append("- Answer exactly the question that is asked, using only facts written in the sources. Do not guess or add outside knowledge.\n")
+        append("- Some sources may be about other topics. Use only the sources that are about the question and ignore the rest.\n")
+        append("- If the question asks a yes/no or \"Did / Is / Does / Was / Were\" question, begin directly with \"Yes,\" or \"No,\" followed by a concise factual explanation based on the sources.\n")
+        append("- For questions asking about order or whether one event happened before/after another, compare their dates, times, headers, or narrative positions in the sources.\n")
+        append("- If the sources do not contain the answer, reply exactly: \"$NOT_FOUND_ANSWER\"\n")
+        append("- If the sources answer only part of the question, answer that part and say which part the document does not cover.\n")
+        append("- Say each point once. Do not repeat sentences.\n")
+        append("- ").append(tinyLengthInstruction(length))
     }
 
     /**

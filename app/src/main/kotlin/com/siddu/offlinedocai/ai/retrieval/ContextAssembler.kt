@@ -84,23 +84,32 @@ object ContextAssembler {
         var skippedRelevant = false
 
         // Fair-share reservation: when multiple sub-queries exist (e.g. comparison sides or clauses),
-        // reserve at least one best candidate matching each sub-query before filling remaining budget.
+        // guarantee balanced representation so neither side gets crowded out by the other.
         if (classification.subQueries.size >= 2) {
+            val perSubQueryTarget = maxOf(2, (budgetTokens / classification.subQueries.size) / 350)
             for (sq in classification.subQueries) {
                 val sqTerms = TextAnalyzer.terms(sq).toSet()
                 if (sqTerms.isEmpty()) continue
-                val match = unique.values.firstOrNull { r ->
-                    r.chunk.id !in selectedIds && r.source != RetrievalSource.NEIGHBOR && run {
+                val matches = unique.values
+                    .filter { it.chunk.id !in selectedIds && it.source != RetrievalSource.NEIGHBOR }
+                    .map { r ->
                         val chunkTerms = TextAnalyzer.terms(listOfNotNull(r.chunk.sectionTitle, r.chunk.text).joinToString("\n")).toSet()
-                        sqTerms.any { it in chunkTerms }
+                        val overlap = sqTerms.count { it in chunkTerms }
+                        r to overlap
                     }
-                }
-                if (match != null) {
-                    val cost = tokenCounter(match.chunk.text) + headerCost
+                    .filter { it.second > 0 }
+                    .sortedWith(compareByDescending<Pair<RetrievalResult, Int>> { it.second }.thenByDescending { it.first.relevanceScore })
+
+                var count = 0
+                for ((cand, _) in matches) {
+                    if (count >= perSubQueryTarget) break
+                    if (cand.chunk.id in selectedIds) continue
+                    val cost = tokenCounter(cand.chunk.text) + headerCost
                     if (used + cost <= budgetTokens) {
-                        selected.add(match)
-                        selectedIds.add(match.chunk.id)
+                        selected.add(cand)
+                        selectedIds.add(cand.chunk.id)
                         used += cost
+                        count++
                     }
                 }
             }

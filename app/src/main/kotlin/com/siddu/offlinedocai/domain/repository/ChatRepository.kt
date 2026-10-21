@@ -77,15 +77,17 @@ class ChatRepository(
          */
         const val RERANK_RELEVANCE_FLOOR = -4f
         const val RERANK_KEEP_FLOOR = -6f
+        const val RERANK_KEEP_FLOOR_COMPARISON = -10f
         const val RERANK_KEEP_MARGIN = 6f
 
         /** Results the model should see: with reranker scores, only the passages that plausibly answer the question. */
         fun focusOnRelevant(results: List<RetrievalResult>, isComparison: Boolean = false): List<RetrievalResult> {
             val best = results.mapNotNull { it.rerankScore }.maxOrNull() ?: return results
             val margin = if (isComparison) 10f else RERANK_KEEP_MARGIN
+            val floor = if (isComparison) RERANK_KEEP_FLOOR_COMPARISON else RERANK_KEEP_FLOOR
             val kept = results.filter { r ->
                 val score = r.rerankScore ?: return@filter true // neighbours and structural results
-                score >= RERANK_KEEP_FLOOR && score >= best - margin
+                score >= floor && score >= best - margin
             }
             // Neighbours are context for kept passages only.
             val keptIds = kept.filter { it.source == RetrievalSource.HYBRID }.map { it.chunk.documentId to it.chunk.chunkIndex }.toSet()
@@ -107,17 +109,17 @@ class ChatRepository(
         fun evidenceCap(intent: QueryIntent, tier: ModelTier = ModelTier.STANDARD): Int = when (tier) {
             ModelTier.TINY -> when (intent) {
                 QueryIntent.SUMMARY, QueryIntent.ENUMERATION -> 1300
-                QueryIntent.COMPARISON -> 800
+                QueryIntent.COMPARISON -> 1200
                 else -> 900
             }
             ModelTier.SMALL -> when (intent) {
                 QueryIntent.SUMMARY, QueryIntent.ENUMERATION -> 1800
-                QueryIntent.COMPARISON -> 1100
+                QueryIntent.COMPARISON -> 2000
                 else -> 1400
             }
             ModelTier.STANDARD -> when (intent) {
                 QueryIntent.SUMMARY, QueryIntent.ENUMERATION -> 2400
-                QueryIntent.COMPARISON -> 1300
+                QueryIntent.COMPARISON -> 2500
                 else -> 2000
             }
         }

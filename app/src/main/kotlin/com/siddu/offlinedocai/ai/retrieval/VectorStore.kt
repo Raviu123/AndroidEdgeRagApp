@@ -61,7 +61,7 @@ class VectorStore(private val chunkDao: ChunkDao, var reranker: PassageReranker?
         const val MIN_DENSE = 0.20f
         private const val BM25_K1 = 1.2
         private const val BM25_B = 0.75
-        private const val NEIGHBOR_SEEDS = 3
+        private const val NEIGHBOR_SEEDS = 6
         private const val SUMMARY_SAMPLES = 24
         /** Fused candidates the cross-encoder re-scores (cost grows linearly: ~one passage per 10–40 ms on phone CPUs). */
         const val RERANK_POOL = 24
@@ -89,7 +89,11 @@ class VectorStore(private val chunkDao: ChunkDao, var reranker: PassageReranker?
         documentIds: List<Long>,
         classification: QueryClassification,
         subQueries: List<SearchQuery> = emptyList(),
-        topK: Int = if (classification.intent == QueryIntent.ENUMERATION) ENUMERATION_TOP_K else DEFAULT_TOP_K,
+        topK: Int = when (classification.intent) {
+            QueryIntent.ENUMERATION -> ENUMERATION_TOP_K
+            QueryIntent.COMPARISON -> 28
+            else -> DEFAULT_TOP_K
+        },
         /** Only chunks embedded by this model are searched (null = no filter). Vectors of different models are never compared. */
         embeddingModelId: String? = null
     ): List<RetrievalResult> {
