@@ -82,7 +82,7 @@ flowchart TD
 ## 2. Ingestion & Preprocessing Pipeline
 
 ### 2.1 Supported Document Formats
-The ingestion pipeline is implemented in [`DocumentProcessor.kt`](../app/src/main/kotlin/com/siddu/offlinedocai/domain/rag/DocumentProcessor.kt):
+The ingestion pipeline is implemented in [`DocumentProcessor.kt`](../app/src/main/kotlin/com/offlinedocai/domain/rag/DocumentProcessor.kt):
 1. **Portable Document Format (`.pdf`)**:
    - Uses `com.tom_roush.pdfbox.android.PDFBoxResourceLoader` and `PDDocument`.
    - Iterates page by page using `PDFTextStripper.startPage` and `endPage`.
@@ -94,7 +94,7 @@ The ingestion pipeline is implemented in [`DocumentProcessor.kt`](../app/src/mai
    - Read line-by-line using buffered UTF-8 readers with paragraph detection.
 
 ### 2.2 Hierarchical Structure-Preserving Chunker
-Implemented in [`TextChunker.kt`](../app/src/main/kotlin/com/siddu/offlinedocai/ai/chunking/TextChunker.kt):
+Implemented in [`TextChunker.kt`](../app/src/main/kotlin/com/offlinedocai/ai/chunking/TextChunker.kt):
 Unlike naive sliding-window text chunkers that blindly slice text at arbitrary word limits, `TextChunker` preserves document semantics:
 - **Structural Heading Detection**: Identifies chapter titles, sections, numbered clauses, and all-caps headings. Headings are attached to child chunks as `sectionTitle` metadata.
 - **List & Bullet Integrity**: Preserves unordered (`•`, `-`, `*`) and ordered lists (`1.`, `a.`), preventing list items from being fractured across separate chunks.
@@ -252,7 +252,7 @@ $$\text{"Computed Difference: } 6^\circ\text{C } (|27 - 21|)\text{"}$$
 
 ## 7. Citation & Claim Validation (Phase 6 Grounding)
 
-Implemented in [`CitationValidator.kt`](../app/src/main/kotlin/com/siddu/offlinedocai/ai/validation/CitationValidator.kt):
+Implemented in [`CitationValidator.kt`](../app/src/main/kotlin/com/offlinedocai/ai/validation/CitationValidator.kt):
 To guarantee zero hallucinations and verifiable citations, all generated output undergoes automated verification prior to UI delivery:
 - **Exact Factual Entity Safety**: Numbers, metrics (e.g., `21C`, `85%`), URLs, emails, and phone numbers must match verbatim in context; ungrounded numbers are flagged.
 - **Completeness Guards**: Statements asserting exhaustive coverage (*"these are all 5 projects"*) are suppressed if the context was budget-limited (`isBudgetLimited = true`).

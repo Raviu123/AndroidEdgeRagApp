@@ -2,7 +2,7 @@
 
 **Subject:** The `unified-rag-v2` working model (production-ready on-device RAG architecture)  
 **Compared against:** The 8 papers in `existing papers/` (EdgeRAG, MobileRAG KAIST, MobileRAG Agent, SRAS, Pocket RAG, RAGdb, HeRo, SmartRAG)  
-**Method:** Systematic code analysis of the `unified-rag-v2` pipeline (`app/src/main/kotlin/com/siddu/offlinedocai/`), Room DB v3 migration, native `llama.cpp` JNI bridge, ONNX embedding engine, and full-text comparative review against the 8 published edge-RAG papers.  
+**Method:** Systematic code analysis of the `unified-rag-v2` pipeline (`app/src/main/kotlin/com/offlinedocai/`), Room DB v3 migration, native `llama.cpp` JNI bridge, ONNX embedding engine, and full-text comparative review against the 8 published edge-RAG papers.  
 **Date:** 2026-10-07  
 
 ---

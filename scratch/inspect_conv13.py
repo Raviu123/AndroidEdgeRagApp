@@ -5,7 +5,7 @@ import sqlite3
 import json
 
 # 1. Pull latest database from phone
-res = subprocess.run(['adb', 'exec-out', 'run-as', 'com.siddu.offlinedocai', 'tar', '-cf', '-', '-C', 'databases', '.'], capture_output=True)
+res = subprocess.run(['adb', 'exec-out', 'run-as', 'com.offlinedocai', 'tar', '-cf', '-', '-C', 'databases', '.'], capture_output=True)
 tf = tarfile.open(fileobj=io.BytesIO(res.stdout))
 tf.extractall('scratch/live_db')
 

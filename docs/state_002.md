@@ -15,19 +15,19 @@ State 002 directly resolves the limitations identified in [state_001.md](state_0
 
 ## 2. Technical Enhancements & Architectural Changes
 
-### A. Dynamic Query Routing & Global Sampling ([VectorStore.kt](../app/src/main/kotlin/com/siddu/offlinedocai/ai/retrieval/VectorStore.kt))
+### A. Dynamic Query Routing & Global Sampling ([VectorStore.kt](../app/src/main/kotlin/com/offlinedocai/ai/retrieval/VectorStore.kt))
 - **Generic Query Detection**: Query strings containing tokens like `about`, `summary`, `summarize`, `overview`, `main`, `tell`, or queries $\le 3$ words are flagged as high-level intent.
 - **Uniform Stratified Sampling**: Rather than pulling localized top-$K$ chunks, the retriever computes a step interval $S = \frac{N_{\text{total}}}{K}$ to sample representative chunks evenly across the entire document length.
 
-### B. Inverse Document Frequency (TF-IDF) Lexical Ranking ([VectorStore.kt](../app/src/main/kotlin/com/siddu/offlinedocai/ai/retrieval/VectorStore.kt))
+### B. Inverse Document Frequency (TF-IDF) Lexical Ranking ([VectorStore.kt](../app/src/main/kotlin/com/offlinedocai/ai/retrieval/VectorStore.kt))
 - For targeted queries where dense vector similarity returns zero/mock values, lexical retrieval computes exact Term Frequency (TF) combined with Inverse Document Frequency (IDF):
 $$\text{IDF}(t) = \ln\left(\frac{N + 1.0}{\text{DF}(t) + 0.5}\right) + 1.0$$
 - Filters out standard English stop words (`what`, `when`, `where`, `how`, `the`, `is`, `and`, etc.) to prevent high-frequency noise from overwhelming scoring.
 
-### C. Clean Synthesis Generator ([GGUFLLM.kt](../app/src/main/kotlin/com/siddu/offlinedocai/ai/llm/GGUFLLM.kt))
+### C. Clean Synthesis Generator ([GGUFLLM.kt](../app/src/main/kotlin/com/offlinedocai/ai/llm/GGUFLLM.kt))
 - Detects global overview prompts and formats the context into bulleted key findings with page attribution tips instead of dumping raw chunk text.
 
-### D. On-Device SLM Model Management ([MainViewModel.kt](../app/src/main/kotlin/com/siddu/offlinedocai/MainViewModel.kt) & [MainActivity.kt](../app/src/main/kotlin/com/siddu/offlinedocai/MainActivity.kt))
+### D. On-Device SLM Model Management ([MainViewModel.kt](../app/src/main/kotlin/com/offlinedocai/MainViewModel.kt) & [MainActivity.kt](../app/src/main/kotlin/com/offlinedocai/MainActivity.kt))
 - **File System Inspection**: Scans `filesDir/models/llm/` for GGUF model files.
 - **Model Switcher**: Allows users to select between multiple downloaded SLM weights (e.g., Qwen 2.5 0.5B vs. Llama 3.2 1B).
 - **Storage Cleanup**: Direct option in the Settings UI to delete downloaded `.gguf` weights and free up disk space.

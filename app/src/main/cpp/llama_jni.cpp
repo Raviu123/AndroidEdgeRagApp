@@ -180,7 +180,7 @@ void ensure_backends(const std::string &lib_dir, bool safe_mode) {
 
 } // namespace
 
-#define JNI_FN(name) Java_com_siddu_offlinedocai_ai_llm_LlamaNative_##name
+#define JNI_FN(name) Java_com_offlinedocai_ai_llm_LlamaNative_##name
 
 extern "C" JNIEXPORT jstring JNICALL
 JNI_FN(nativeInitBackends)(JNIEnv *env, jclass, jstring lib_dir, jboolean safe_mode) {

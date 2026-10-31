@@ -18,7 +18,7 @@ from pathlib import Path
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
-PACKAGE_NAME = "com.siddu.offlinedocai"
+PACKAGE_NAME = "com.offlinedocai"
 BENCHMARK_TAG = "OFFLINE_DOC_AI_BENCHMARK"
 
 BASE_DIR = Path(__file__).resolve().parent.parent

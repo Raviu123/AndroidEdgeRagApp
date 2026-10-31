@@ -12,11 +12,11 @@ val bundledEmbeddingSha256 = "afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1
 val bundledRerankerSha256 = "e9d8ebf845c413e981c175bfe49a3bfa9b3dcce2a3ba54875ee5df5a58639fbe"
 
 android {
-    namespace = "com.siddu.offlinedocai"
+    namespace = "com.offlinedocai"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.siddu.offlinedocai"
+        applicationId = "com.offlinedocai"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

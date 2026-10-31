@@ -71,7 +71,7 @@ Immediately following draft v4, the development and experimental pipeline progre
 ```
 
 ### A. Stage 2 & 3: Two-Stage Retrieval with On-Device Cross-Encoder Reranking
-* **File:** `app/src/main/kotlin/com/siddu/offlinedocai/ai/retrieval/CrossEncoderReranker.kt`
+* **File:** `app/src/main/kotlin/com/offlinedocai/ai/retrieval/CrossEncoderReranker.kt`
 * **Implementation:** Integrates `ms-marco-MiniLM-L-6-v2` (quantized INT8 ONNX, ~23 MB footprint) running intra-op multi-threaded on device CPU.
 * **Mechanism:**
   1. First-stage hybrid search retrieves a candidate pool of `RERANK_POOL = 24` fused chunks using Dense + BM25 Reciprocal Rank Fusion ($k=60$).
@@ -81,7 +81,7 @@ Immediately following draft v4, the development and experimental pipeline progre
 * **Problem Solved:** Bi-encoder dot-products frequently ranked generic sections (Table of Contents p. 3–4, Foreword p. 5) above specific operational controls because of broad lexical overlap. The cross-encoder distinguishes semantic relevance from surface vocabulary sharing.
 
 ### B. Stage 4: Model-Tier Evidence Budgeting & Dynamic Context Sizing
-* **Files:** `app/src/main/kotlin/com/siddu/offlinedocai/ai/llm/ModelTier.kt`, `app/src/main/kotlin/com/siddu/offlinedocai/domain/repository/ChatRepository.kt`, `benchmarks/specs.md`
+* **Files:** `app/src/main/kotlin/com/offlinedocai/ai/llm/ModelTier.kt`, `app/src/main/kotlin/com/offlinedocai/domain/repository/ChatRepository.kt`, `benchmarks/specs.md`
 * **Implementation:** Replaces the static 2,000-token evidence budget with hardware- and model-aware stratification:
 
 | Parameter Tier | Target Models | General Evidence Cap | Comparison / Sequential Cap | Approx. Evidence Chunks |
@@ -93,19 +93,19 @@ Immediately following draft v4, the development and experimental pipeline progre
 * **Problem Solved:** 0.5B models suffered severe attention dilution and cognitive overload when presented with 2,000 tokens of context. Sizing context to 2–4 high-confidence chunks slashed prefill time by >50% (from ~45 s down to ~18 s on 4 GB SoC) while dramatically reducing hallucination.
 
 ### C. Ingestion: Automated Running Header/Footer & Page Number Stripping
-* **File:** `app/src/main/kotlin/com/siddu/offlinedocai/ai/chunking/TextChunker.kt` (`stripRunningHeadersAndFooters`)
+* **File:** `app/src/main/kotlin/com/offlinedocai/ai/chunking/TextChunker.kt` (`stripRunningHeadersAndFooters`)
 * **Mechanism:** Analyzes the first and last lines across document pages. Repetitive strings occurring across $\ge 3$ consecutive pages (e.g., `"OWASP Mobile Application Security Verification Standard"`, `"Page X of Y"`) are stripped prior to chunk boundary calculation.
 * **Problem Solved:** Eliminated artificial BM25 keyword inflation caused by page footers and headers repeating identical terms across every chunk.
 
 ### D. Intent Routing & Context Assembly for Chronological & Sequential Reasoning
-* **Files:** `app/src/main/kotlin/com/siddu/offlinedocai/ai/retrieval/QueryIntentRouter.kt`, `app/src/main/kotlin/com/siddu/offlinedocai/ai/retrieval/ContextAssembler.kt`
+* **Files:** `app/src/main/kotlin/com/offlinedocai/ai/retrieval/QueryIntentRouter.kt`, `app/src/main/kotlin/com/offlinedocai/ai/retrieval/ContextAssembler.kt`
 * **Mechanism:**
   1. `QueryIntentRouter.extractSequentialClauses`: Regex and syntax analysis detect temporal connectors (`before`, `after`, `then`, `previously`). It isolates the two temporal anchor clauses ($E_A, E_B$), executing parallel sub-query searches.
   2. `ContextAssembler`: In standard `GENERAL` queries, evidence blocks are sorted strictly by relevance score ($s_{\text{rerank}}$ descending). For `COMPARISON` and sequential queries, evidence blocks are **re-assembled in natural document/chronological order**.
 * **Problem Solved:** Reversing or scrambling chronological chunks in the context window prevented SLMs from deducing temporal precedence (e.g., whether Event A occurred before Event B).
 
 ### E. Generation Guardrails: Repetition & Truncation Handling
-* **Files:** `app/src/main/kotlin/com/siddu/offlinedocai/ai/llm/RepetitionGuard.kt`, `app/src/main/kotlin/com/siddu/offlinedocai/ai/llm/PromptBuilder.kt`
+* **Files:** `app/src/main/kotlin/com/offlinedocai/ai/llm/RepetitionGuard.kt`, `app/src/main/kotlin/com/offlinedocai/ai/llm/PromptBuilder.kt`
 * **Mechanism:** Detects n-gram generation loops and repeating numbered list items ($k \ge 3$ consecutive repeated patterns) in real-time, truncates runaway generation loops, and renumbers valid outputs.
 * **System Prompt:** Injects targeted refusal instructions (`"If the sources do not contain the answer, reply exactly: 'I couldn't find this in the selected document(s).'"`) and explicit guidance on how to compare dates and timestamps.
 

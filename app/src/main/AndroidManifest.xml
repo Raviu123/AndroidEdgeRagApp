@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.siddu.offlinedocai">
+>
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Model downloads (0.5–1.5 GB) run in a WorkManager foreground worker (dataSync) so they keep

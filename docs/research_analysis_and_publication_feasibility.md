@@ -24,7 +24,7 @@
 
 ## 1. Deep Structural Analysis of the OfflineDocAI System
 
-The codebase in [`app/src/main/kotlin`](../app/src/main/kotlin/com/siddu/offlinedocai/) and [`app/src/main/cpp`](../app/src/main/cpp/llama_jni.cpp) implements a fully vertically integrated, **100% air-gapped, zero-data-egress** on-device RAG architecture.
+The codebase in [`app/src/main/kotlin`](../app/src/main/kotlin/com/offlinedocai/) and [`app/src/main/cpp`](../app/src/main/cpp/llama_jni.cpp) implements a fully vertically integrated, **100% air-gapped, zero-data-egress** on-device RAG architecture.
 
 ```mermaid
 flowchart TD

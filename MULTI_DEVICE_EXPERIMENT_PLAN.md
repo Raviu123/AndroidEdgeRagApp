@@ -141,7 +141,7 @@ adb shell "cat /proc/meminfo | grep MemTotal"
 adb push Grafting_15_Page_Guide.pdf /sdcard/Documents/
 
 # (Optional) Push pre-downloaded GGUF models directly to avoid in-app download time
-adb push qwen2.5-1.5b-instruct-q4_k_m.gguf /sdcard/Android/data/com.siddu.offlinedocai/files/models/llm/
+adb push qwen2.5-1.5b-instruct-q4_k_m.gguf /sdcard/Android/data/com.offlinedocai/files/models/llm/
 ```
 
 ### Step 4: Run Batch Queue & Stream Telemetry
@@ -150,19 +150,19 @@ adb push qwen2.5-1.5b-instruct-q4_k_m.gguf /sdcard/Android/data/com.siddu.offlin
 adb logcat -c
 
 # 2. Launch App
-adb shell am start -n com.siddu.offlinedocai/.MainActivity
+adb shell am start -n com.offlinedocai/.MainActivity
 
 # 3. Stream real-time logs for LLM generation & retrieval metrics
 adb logcat -s "VectorStore" "LlamaRunner" "ContextAssembler" "ChatRepository"
 
 # 4. Monitor Peak Memory in background loop during generation
-adb shell dumpsys meminfo com.siddu.offlinedocai
+adb shell dumpsys meminfo com.offlinedocai
 ```
 
 ### Step 5: Pull Exported Benchmark Session
 ```powershell
 # Pull the exported JSON benchmark log from the app
-adb pull /sdcard/Android/data/com.siddu.offlinedocai/files/exports/ ./benchmark_results/
+adb pull /sdcard/Android/data/com.offlinedocai/files/exports/ ./benchmark_results/
 ```
 
 ---
